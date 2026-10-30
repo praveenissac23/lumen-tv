@@ -13,3 +13,5 @@ android/app/lumen.jks
 __pycache__/
 mac/vendor/
 mac/build/
+mac/build.log
+mac/errors.txt

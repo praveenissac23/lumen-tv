@@ -3,6 +3,9 @@
 # Needs the interface already bundled into build/web (tools/build-web.sh).
 set -euo pipefail
 cd "$(dirname "$0")"
+# Report failures as annotations (readable through the GitHub API) as well as in the log.
+note() { echo "::error title=$1::$(printf '%s' "$2" | head -c 3500 | awk 'BEGIN{ORS="%0A"}{gsub(/%/,"%25");gsub(/\r/,"");print}')"; }
+trap 'note "build.sh failed at line $LINENO" "$(tail -40 build.log 2>/dev/null)"' ERR
 ROOT="$(cd .. && pwd)"
 BUILD="${BUILD_NUMBER:-1}"
 VLC_URL="https://download.videolan.org/pub/cocoapods/prod/VLCKit-3.7.3-319ed2c0-79128878.tar.xz"
@@ -19,16 +22,25 @@ if [ ! -d vendor/VLCKit.xcframework ]; then
 fi
 SLICE="$(find vendor/VLCKit.xcframework -maxdepth 1 -type d -name 'macos*' | head -1)"
 echo "VLCKit slice: $SLICE"; ls "$SLICE"
-file "$SLICE/VLCKit.framework/VLCKit" || true
+file "$SLICE/VLCKit.framework/VLCKit" | tee build.log || true
+echo "::notice title=VLCKit::$(ls "$SLICE" | tr '\n' ' ') | $(file -b "$SLICE/VLCKit.framework/VLCKit" | head -c 300) | headers: $(ls "$SLICE/VLCKit.framework/Headers" | head -5 | tr '\n' ' ') | modules: $(ls "$SLICE/VLCKit.framework/Modules" 2>/dev/null | tr '\n' ' ')"
 
 # 2. Compile
 APP="build/Lumen TV.app"
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
+set +e
 swiftc -O -swift-version 5 -target arm64-apple-macos11.0 \
   -import-objc-header Bridging.h -F "$SLICE" -Xcc -F -Xcc "$SLICE" \
   -framework VLCKit -framework Cocoa -framework WebKit -lsqlite3 \
   -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
-  Sources/*.swift -o "$APP/Contents/MacOS/LumenTV"
+  Sources/*.swift -o "$APP/Contents/MacOS/LumenTV" 2>&1 | tee build.log
+st=${PIPESTATUS[0]}
+set -e
+if [ "$st" != "0" ]; then
+  grep -E "error:|Undefined symbol|ld: |_OBJC_CLASS_|referenced from" build.log | head -25 > errors.txt || true
+  i=0; while IFS= read -r line; do i=$((i+1)); echo "::error title=swift $i::$line"; done < errors.txt
+  exit 1
+fi
 
 # 3. Bundle
 ditto "$SLICE/VLCKit.framework" "$APP/Contents/Frameworks/VLCKit.framework"
