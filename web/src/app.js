@@ -185,10 +185,11 @@ function openVoice() {
   pushLayer(voiceLayer);
   v.classList.add('listening');
   if (!dev.voice) {
-    // Fire TV: apps can't use the microphone directly, so open the search box with the
-    // Fire TV keyboard; holding the Alexa button there dictates straight into it.
+    // This TV doesn't let apps use the microphone. Open search with the on-screen keyboard;
+    // the Dictate button there opens the Fire TV keyboard (hold Alexa to speak).
     closeVoice();
-    go('search', { ime: true }, { replace: !!(current && current.name === 'search') });
+    if (current && current.name === 'search') { focus($('#sr-dictate') || $('.key')); return; }
+    go('search', { ime: true });
     return;
   }
   N.voiceStart();
@@ -291,29 +292,37 @@ function start() {
 }
 
 // Scale the 1920x1080 stage to the window.
+// Measure the real visible area from inside the page (a fixed 100vw x 100vh box).
+// Sizes reported by Android can be in different units on some TVs, so they aren't used.
 function viewSize() {
-  // The TV app reports its real size; browsers use the window.
-  if (window.Native && window.Native.viewSize) {
-    try { const v = JSON.parse(window.Native.viewSize()); if (v.w > 100 && v.h > 100) return v; } catch { /* fall back */ }
+  let p = document.getElementById('vp-probe');
+  if (!p) {
+    p = document.createElement('div');
+    p.id = 'vp-probe';
+    p.style.cssText = 'position:fixed;left:0;top:0;width:100vw;height:100vh;visibility:hidden;pointer-events:none;z-index:-1';
+    document.documentElement.appendChild(p);
   }
-  const vv = window.visualViewport;
-  return { w: (vv && vv.width) || document.documentElement.clientWidth || innerWidth, h: (vv && vv.height) || document.documentElement.clientHeight || innerHeight };
+  const r = p.getBoundingClientRect();
+  const w = r.width || innerWidth || document.documentElement.clientWidth;
+  const h = r.height || innerHeight || document.documentElement.clientHeight;
+  return { w, h };
 }
+window.__viewSize = viewSize;
 function fit() {
   const v = viewSize();
+  if (!v.w || !v.h) return;
   const adj = { s: 0.92, m: 1, l: 1.06 }[setting('uiSize')] || 1;   // overscan / preference
   const s = Math.min(v.w / 1920, v.h / 1080) * adj;
   const st = $('#stage');
-  const innerWidth = v.w, innerHeight = v.h;
-  document.body.style.width = v.w + 'px'; document.body.style.height = v.h + 'px';
   st.style.transform = `scale(${s})`;
-  st.style.left = (innerWidth - 1920 * s) / 2 + 'px';
-  st.style.top = (innerHeight - 1080 * s) / 2 + 'px';
+  st.style.left = (v.w - 1920 * s) / 2 + 'px';
+  st.style.top = (v.h - 1080 * s) / 2 + 'px';
 }
 addEventListener('resize', fit);
 N.on('resize', () => setTimeout(fit, 50));
 addEventListener('load', fit);
 setTimeout(fit, 300);
+setTimeout(fit, 1500);
 fit();
 window.__fit = fit;
 boot();

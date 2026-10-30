@@ -107,7 +107,8 @@ function frac(rect) {
   const st = document.getElementById('stage');
   const b = st.getBoundingClientRect();
   const k = b.width / 1920;
-  const W = document.body.clientWidth || innerWidth, H = document.body.clientHeight || innerHeight;
+  const v = window.__viewSize ? window.__viewSize() : { w: innerWidth, h: innerHeight };
+  const W = v.w, H = v.h;
   return { fx: (b.left + rect.x * k) / W, fy: (b.top + rect.y * k) / H, fw: (rect.w * k) / W, fh: (rect.h * k) / H };
 }
 export function play(url, { rect = null, start = 0, live = true } = {}) {

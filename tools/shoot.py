@@ -200,7 +200,8 @@ def scenario_settings_new(page):
 
 def scenario_ime(page):
     page.evaluate("__app.go('search', {ime: true})"); page.wait_for_timeout(300)
-    page.fill('#sr-input', 'kerala')
+    page.evaluate("document.querySelector('#sr-dictate').click()"); page.wait_for_timeout(200)
+    page.keyboard.type('kerala')
     page.wait_for_timeout(400)
     shot(page, '36-voice-dictation-search')
 

@@ -17,11 +17,11 @@ export class SearchScreen {
     this.q = params.restore?.q ?? params.q ?? '';
     view.innerHTML = `<div class="sr">
       <aside class="sr-kb">
-        <div class="sr-box">${icon('search')}<input class="f sr-input" id="sr-input" value="${esc(this.q)}" placeholder="Search" autocomplete="off" spellcheck="false">
+        <div class="sr-box">${icon('search')}<input class="sr-input" id="sr-input" value="${esc(this.q)}" placeholder="Search" autocomplete="off" spellcheck="false" readonly inputmode="none" tabindex="-1">
           <button class="f mic-btn sm" id="sr-mic" aria-label="Voice search">${icon('mic')}</button></div>
         <div class="kb" data-group="kb">${KEYS.map((k) => `<button class="f key" data-key="${k}">${k}</button>`).join('')}
           <button class="f key wide" data-key=" ">Space</button><button class="f key" data-key="del" aria-label="Delete">${icon('back')}</button><button class="f key" data-key="clear">Clear</button></div>
-        ${params.ime ? `<div class="ime-hint">${icon('mic')}<span>Hold the Alexa button and speak. Your words appear in the search box.</span></div>` : ''}
+        <button class="f dictate" id="sr-dictate">${icon('mic')}<span>Dictate with the TV keyboard</span><small>Opens the Fire TV keyboard. Hold the Alexa button and speak, then press Back.</small></button>
         <div class="sr-sugg" id="sr-sugg" data-group="sugg"></div>
       </aside>
       <section class="sr-results"><div class="sr-scroll" data-scroll="y" data-pad="0"><div class="sr-track" id="sr-track"></div></div></section>
@@ -40,6 +40,9 @@ export class SearchScreen {
       this.run();
     });
     view.querySelector('#sr-mic').onclick = () => app.openVoice();
+    view.querySelector('#sr-dictate').onclick = () => this.dictate();
+    // the TV keyboard types into the field; mirror it into the search
+    this.input.addEventListener('blur', () => { this.input.readOnly = true; this.input.tabIndex = -1; if (this.view.contains(document.activeElement) === false) focus(this.view.querySelector('#sr-dictate')); });
     view.addEventListener('click', (e) => {
       const s = e.target.closest('[data-q]');
       if (s) { this.q = s.dataset.q; this.input.value = this.q; this.paint(); return; }
@@ -158,6 +161,10 @@ export class SearchScreen {
 
   onKey(k) {
     const a = document.activeElement;
+    if (a === this.input) {
+      if (k === 'back' || k === 'submit' || k === 'down') { this.input.blur(); focus(this.view.querySelector(k === 'submit' && this.res ? '.sr-results .f' : '#sr-dictate') || this.view.querySelector('.key')); return true; }
+      if (k === 'up' || k === 'left' || k === 'right') return true;
+    }
     if (k === 'hold' && a && a.closest('.res')) {
       const t = a.closest('.res'), kind = t.dataset.kind;
       if (kind === 'live') itemActions('live', this.res.live[+t.dataset.i], this.app, { list: this.res.live });
@@ -166,7 +173,6 @@ export class SearchScreen {
       return true;
     }
     if (k === 'submit') { pushSearch(this.q); const f = this.view.querySelector('.sr-results .f'); if (f) focus(f); return true; }
-    if (a === this.input && k === 'down') { focus(this.view.querySelector('.key')); return true; }
     if (a && a.closest('.kb') && k === 'right') {
       const keys = [...this.view.querySelectorAll('.kb .key')];
       const i = keys.indexOf(a);
@@ -177,8 +183,15 @@ export class SearchScreen {
     return false;
   }
 
+  // Opens the TV's own keyboard on request only (on Fire TV, holding Alexa there dictates).
+  dictate() {
+    this.input.readOnly = false; this.input.tabIndex = 0;
+    this.input.focus();
+    showKeyboard();
+  }
+
   focus() {
-    if (this.params.ime) { focus(this.input); showKeyboard(); return; }
+    if (this.params.ime) { focus(this.view.querySelector('#sr-dictate')); return; }
     if (this.params.voice && this.view.querySelector('.sr-results .f')) { focus(this.view.querySelector('.sr-results .f')); return; }
     focus(this.view.querySelector('.key'));
   }
