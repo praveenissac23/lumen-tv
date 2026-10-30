@@ -11,3 +11,5 @@ android/app/src/main/assets/
 android/app/lumen.jks
 *.jks
 __pycache__/
+mac/vendor/
+mac/build/

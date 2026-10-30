@@ -1,0 +1,46 @@
+# Builds Lumen TV for Mac (Apple chips) on every change and publishes it as a release
+# tagged mac-build-N. The Mac app checks these releases and offers "Update available".
+name: Build Mac app
+on:
+  push:
+    branches: [main]
+    paths-ignore: ['README.md', 'design/banner.png', 'tools/shoot.py', 'tools/bridge_test.py', 'android/**']
+  workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build-mac
+  cancel-in-progress: false
+
+jobs:
+  mac:
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with: { node-version: 20, cache: npm }
+
+      - name: Build the interface
+        run: npm ci && bash tools/build-web.sh
+
+      - name: Cache the VLC engine
+        uses: actions/cache@v4
+        with:
+          path: mac/vendor
+          key: vlckit-3.7.3
+
+      - name: Build the Mac app
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: bash mac/build.sh
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ github.event.head_commit.message }}
+        run: |
+          gh release create "mac-build-${{ github.run_number }}" "mac/build/lumen-tv-mac.zip" \
+            --title "Lumen TV for Mac build ${{ github.run_number }}" \
+            --notes "${NOTES:-Manual build}" --latest=false

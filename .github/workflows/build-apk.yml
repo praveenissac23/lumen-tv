@@ -4,7 +4,7 @@ name: Build APK
 on:
   push:
     branches: [main]
-    paths-ignore: ['README.md', 'design/**', 'tools/shoot.py', 'tools/bridge_test.py']
+    paths-ignore: ['README.md', 'design/**', 'tools/shoot.py', 'tools/bridge_test.py', 'mac/**', '.github/workflows/build-mac.yml']
   workflow_dispatch:
 
 permissions:

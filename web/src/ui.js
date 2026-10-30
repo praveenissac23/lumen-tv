@@ -54,7 +54,7 @@ export const icon = (name, cls = '') =>
 // On the TV, images go through the native thumbnail service (small JPEGs, cached on disk).
 export function imgUrl(url, w) {
   if (!url) return '';
-  return isNative ? `https://thumb.lumen/?w=${w}&u=${encodeURIComponent(url)}` : url;
+  return isNative ? `${window.__thumbBase || 'https://thumb.lumen/?'}w=${w}&u=${encodeURIComponent(url)}` : url;
 }
 // Channel logo with a monogram fallback; real logos load lazily and replace it.
 export function logo(ch, size = '') {

@@ -6,7 +6,9 @@ import { icon, toast } from './ui.js';
 import { pushLayer, popLayer, focus } from './nav.js';
 
 const REPO = 'praveenissac23/lumen-tv';
-const API = `https://api.github.com/repos/${REPO}/releases/latest`;
+// TV builds are tagged build-N (an .apk); Mac builds mac-build-N (a .zip). Each app looks for its own.
+const API = `https://api.github.com/repos/${REPO}/releases?per_page=30`;
+const isMac = () => N.device().platform === 'mac';
 
 export const update = { available: null, checkedAt: 0 };
 
@@ -18,10 +20,15 @@ export function currentBuild() {
 // Returns {build, notes, url} when a newer build exists, otherwise null.
 export async function checkForUpdate({ quiet = true } = {}) {
   try {
-    const r = JSON.parse(await N.http(API, { timeout: 15000 }));
+    const list = JSON.parse(await N.http(API, { timeout: 15000 }));
     update.checkedAt = Date.now();
+    const mac = isMac();
+    const want = mac ? /^mac-build-\d+$/ : /^build-\d+$/;
+    const file = mac ? /\.zip$/i : /\.apk$/i;
+    const r = (Array.isArray(list) ? list : []).filter((x) => want.test(x.tag_name || '') && !x.draft)
+      .sort((a, b) => (+b.tag_name.replace(/\D/g, '')) - (+a.tag_name.replace(/\D/g, '')))[0] || {};
     const build = +String(r.tag_name || '').replace(/\D/g, '') || 0;
-    const asset = (r.assets || []).find((a) => /\.apk$/i.test(a.name));
+    const asset = (r.assets || []).find((a) => file.test(a.name));
     if (!asset || build <= currentBuild()) {
       update.available = null;
       if (!quiet) toast(`You have the latest version (build ${currentBuild() || '?'})`);
@@ -74,7 +81,7 @@ N.on('update', (d) => {
   const pct = document.getElementById('upd-pct');
   const bar = document.querySelector('.update-progress .bar i');
   if (d.state === 'downloading') { if (bar) bar.style.width = d.pct + '%'; if (pct) pct.textContent = `Downloading ${d.pct}%`; }
-  if (d.state === 'installing' && pct) pct.textContent = 'Opening the installer. Choose Install (or Update).';
+  if (d.state === 'installing' && pct) pct.textContent = isMac() ? 'Installing. Lumen TV will restart in a moment.' : 'Opening the installer. Choose Install (or Update).';
   if (d.state === 'permission' && pct) pct.textContent = 'One time only: switch on “Allow from this source” for Lumen TV, then press Back.';
   if (d.state === 'error') { if (pct) pct.textContent = `Update failed: ${d.msg}`; toast(`Update failed: ${d.msg}`, 'err'); }
 });

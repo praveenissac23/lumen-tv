@@ -38,6 +38,10 @@ export function initInput() {
     let name = KEYMAP[e.key];
     if (!name && /^[0-9]$/.test(e.key)) name = 'd' + e.key;
     if (!name && e.keyCode === 4) name = 'back';
+    // Computer keyboard: typing a letter anywhere starts a search
+    if (!name && !inInput && window.__desktop && e.key && e.key.length === 1 && !e.metaKey && !e.ctrlKey && !e.altKey) {
+      e.preventDefault(); dispatch('char:' + e.key, e); return;
+    }
     if (!name) return;
     if (inInput) {
       // let typing work; Backspace edits, arrows leave the field vertically

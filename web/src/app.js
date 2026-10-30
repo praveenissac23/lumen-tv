@@ -154,6 +154,12 @@ function appKey(k, e) {
     if (inRail) { if (current) current.ctl.focus ? current.ctl.focus() : focusFirst($('#view')); return true; }
     back(); return true;
   }
+  if (k.startsWith('char:')) {
+    const c = k.slice(5);
+    if (current && current.name === 'search' && current.ctl.typeChar) current.ctl.typeChar(c);
+    else go('search', { q: c, type: true });
+    return true;
+  }
   if (k === 'search') { openVoice(); return true; }
   if (k === 'menu' && setting('menuKey') !== 'options') { openVoice(); return true; }
   if (k === 'guide') { go('guide', {}); return true; }

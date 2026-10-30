@@ -162,7 +162,7 @@ export class SettingsScreen {
     return `<h1>Phone remote</h1>
       <p class="st-intro">Use your phone to type or dictate searches, paste playlist logins, subtitle keys and wallpaper links, instead of the TV keyboard. Your phone must be on the same Wi-Fi.</p>
       ${c && c.url ? `<div class="phone-card"><div class="qr-box sm">${qr}</div><div><p>Scan with your phone camera, or open</p><b class="big">${esc(c.url)}</b><p>Code: <b>${esc(c.pin)}</b></p></div></div>`
-        : '<p class="st-intro">The phone page isn’t running. Check that the TV is connected to Wi-Fi.</p>'}
+        : window.__desktop ? '<p class="st-intro">The phone remote is part of the TV app. On a Mac, type and paste straight into the app.</p>' : '<p class="st-intro">The phone page isn’t running. Check that the TV is connected to Wi-Fi.</p>'}
       <div class="st-note"><h2>On the phone page</h2><ul><li>Search box: type, or tap the microphone on your phone keyboard to speak. Results open on the TV.</li>
       <li>Add an Xtream login or M3U link</li><li>Paste your OpenSubtitles key</li><li>Set a wallpaper from an image link</li></ul></div>`;
   }

@@ -21,7 +21,7 @@ export class SearchScreen {
           <button class="f mic-btn sm" id="sr-mic" aria-label="Voice search">${icon('mic')}</button></div>
         <div class="kb" data-group="kb">${KEYS.map((k) => `<button class="f key" data-key="${k}">${k}</button>`).join('')}
           <button class="f key wide" data-key=" ">Space</button><button class="f key" data-key="del" aria-label="Delete">${icon('back')}</button><button class="f key" data-key="clear">Clear</button></div>
-        <button class="f dictate" id="sr-dictate">${icon('mic')}<span>Speak or type</span><small>Opens the TV keyboard. Hold the Alexa (mic) button and speak, then press Search.</small></button>
+        <button class="f dictate" id="sr-dictate">${icon('mic')}<span>Speak or type</span><small>${window.__desktop ? 'Type on your keyboard, or press the dictation key (or Fn twice) and speak.' : 'Opens the TV keyboard. Hold the Alexa (mic) button and speak, then press Search.'}</small></button>
         <div class="sr-sugg" id="sr-sugg" data-group="sugg"></div>
       </aside>
       <section class="sr-results"><div class="sr-scroll" data-scroll="y" data-pad="0"><div class="sr-track" id="sr-track"></div></div></section>
@@ -213,7 +213,16 @@ export class SearchScreen {
     });
   }
 
+  // Computer keyboard: put the caret in the search box and keep typing there.
+  typeChar(c) {
+    this.input.readOnly = false; this.input.tabIndex = 0;
+    if (document.activeElement !== this.input) this.input.focus();
+    if (c) { this.q += c; this.input.value = this.q; this.run(); }
+    const n = this.input.value.length; try { this.input.setSelectionRange(n, n); } catch { /* ignore */ }
+  }
+
   focus() {
+    if (window.__desktop && (this.params.type || this.params.ime)) { this.typeChar(''); return; }
     if (this.params.ime) { focus(this.view.querySelector('#sr-dictate')); return; }
     if (this.params.voice && this.view.querySelector('.sr-results .f')) { focus(this.view.querySelector('.sr-results .f')); return; }
     focus(this.view.querySelector('.key'));
