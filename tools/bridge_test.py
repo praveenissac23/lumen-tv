@@ -31,7 +31,7 @@ SIG = {
     'seekBy': ['number'], 'seekTo': ['number'], 'setRect': ['string'], 'setResize': ['string'], 'setBuffer': ['number'],
     'apps': [], 'openWith': ['string', 'string', 'string'], 'copy': ['string'], 'openUrl': ['string'], 'head': ['number', 'string'],
     'call': ['number', 'string', 'string', 'string', 'string'], 'subtitleHash': ['number', 'string'], 'loadSubtitle': ['string', 'string', 'string'],
-    'tracks': [], 'installUpdate': ['string'], 'selectTrack': ['string', 'string'], 'setSpeed': ['number'], 'companion': [], 'showKeyboard': [],
+    'tracks': [], 'installUpdate': ['string'], 'selectTrack': ['string', 'string'], 'setSpeed': ['number'], 'companion': [], 'showKeyboard': [], 'textInput': ['string', 'string', 'string'],
 }
 MOCK = """
 (() => {
@@ -49,6 +49,7 @@ MOCK = """
     http: (id, url, t) => { fetch(url).then(r => r.ok ? r.text() : Promise.reject(r.status)).then(b => { bodies[id] = b; fire('http', {id, ok: true}); }, e => fire('http', {id, ok: false, error: 'HTTP ' + e})); },
     take: (id) => { const b = bodies[id]; delete bodies[id]; return b; },
     viewSize: () => JSON.stringify({w: innerWidth, h: innerHeight}),
+    textInput: (title, hint, init) => fire('textinput', {text: 'arena'}),
     catalog: (id, url, kind, key) => {
       const XF = { live: {stream_id:'id',num:'num',name:'name',category_id:'cat',stream_icon:'logo',epg_channel_id:'epg',tv_archive:'arch',tv_archive_duration:'archDays'},
         movie: {stream_id:'id',name:'name',category_id:'cat',stream_icon:'img',rating_5based:'r5',rating:'r',year:'year',releaseDate:'date',added:'added',container_extension:'ext'},
@@ -115,6 +116,15 @@ with sync_playwright() as p:
         print(page.evaluate("[...document.querySelectorAll('.g-row')].slice(0,3).map(r => r.textContent.replace(/\\s+/g,' ').slice(0,100))"))
     page.evaluate("__app.go('search', {q: 'match'})"); page.wait_for_timeout(900)
     print('on tv results:', page.evaluate("document.querySelectorAll('.prog-tile').length"))
+    page.evaluate("__app.go('search', {ime: true})"); page.wait_for_timeout(300)
+    page.evaluate("document.querySelector('#sr-dictate').click()"); page.wait_for_timeout(600)
+    print('native search box -> query:', page.evaluate("document.querySelector('#sr-input, .sr-input input, input')?.value"), '| results:', page.evaluate("document.querySelectorAll('.sr-results .f, .res').length"))
+    page.evaluate("__app.go('home', {}, {root:true})"); page.wait_for_timeout(300)
+    page.evaluate("window.Native.deviceInfo = () => JSON.stringify({fireTv: true, voice: false, model: 'AFTSS', version: '1.7'})")
+    page.keyboard.press('F1'); page.wait_for_timeout(800)
+    print('Fire TV Menu key -> native box used:', any(c['name'] == 'textInput' for c in page.evaluate('window.__calls')[-20:]), '| screen:', page.evaluate("document.body.dataset.screen"), '| playing:', page.evaluate("document.body.classList.contains('playing')"))
+    if page.evaluate("document.body.classList.contains('playing')"): page.keyboard.press('Escape'); page.wait_for_timeout(300)
+    print('page transparent on TV:', page.evaluate("getComputedStyle(document.body).backgroundColor"), page.evaluate("getComputedStyle(document.documentElement).backgroundColor"))
     # long-press menu -> external player, download path with HEAD, subtitles search
     page.evaluate("__app.go('home', {}, {root:true})"); page.wait_for_timeout(400)
     page.evaluate("__app.go('detail', {kind:'movie', id: __C.movie[0].id})"); page.wait_for_timeout(400)

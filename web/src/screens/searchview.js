@@ -7,7 +7,7 @@ import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots } from '
 import { search, suggestFrom, searchOnTv } from '../search.js';
 import { playLive, playCatchup } from '../player.js';
 import { itemActions } from '../actions.js';
-import { showKeyboard } from '../native.js';
+import { showKeyboard, textInput } from '../native.js';
 
 const KEYS = 'abcdefghijklmnopqrstuvwxyz1234567890'.split('');
 
@@ -21,7 +21,7 @@ export class SearchScreen {
           <button class="f mic-btn sm" id="sr-mic" aria-label="Voice search">${icon('mic')}</button></div>
         <div class="kb" data-group="kb">${KEYS.map((k) => `<button class="f key" data-key="${k}">${k}</button>`).join('')}
           <button class="f key wide" data-key=" ">Space</button><button class="f key" data-key="del" aria-label="Delete">${icon('back')}</button><button class="f key" data-key="clear">Clear</button></div>
-        <button class="f dictate" id="sr-dictate">${icon('mic')}<span>Dictate with the TV keyboard</span><small>Opens the Fire TV keyboard. Hold the Alexa button and speak, then press Back.</small></button>
+        <button class="f dictate" id="sr-dictate">${icon('mic')}<span>Speak or type</span><small>Opens the TV keyboard. Hold the Alexa (mic) button and speak, then press Search.</small></button>
         <div class="sr-sugg" id="sr-sugg" data-group="sugg"></div>
       </aside>
       <section class="sr-results"><div class="sr-scroll" data-scroll="y" data-pad="0"><div class="sr-track" id="sr-track"></div></div></section>
@@ -198,9 +198,19 @@ export class SearchScreen {
 
   // Opens the TV's own keyboard on request only (on Fire TV, holding Alexa there dictates).
   dictate() {
-    this.input.readOnly = false; this.input.tabIndex = 0;
-    this.input.focus();
-    showKeyboard();
+    const p = textInput('Search Lumen TV', 'Hold the microphone (Alexa) button on your remote and speak, or type with the keyboard. Then press Search.', this.q);
+    if (!p) {   // browser: type straight into the box
+      this.input.readOnly = false; this.input.tabIndex = 0;
+      this.input.focus();
+      showKeyboard();
+      return;
+    }
+    p.then((text) => {
+      if (text == null) { focus(this.view.querySelector('#sr-dictate')); return; }
+      this.q = text; this.input.value = text; this.params.voice = true; this.params.q = text;
+      this.paint();
+      setTimeout(() => focus(this.view.querySelector('.sr-results .f') || this.view.querySelector('#sr-dictate')), 50);
+    });
   }
 
   focus() {

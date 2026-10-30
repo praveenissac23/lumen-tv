@@ -34,6 +34,7 @@ class MainActivity : Activity() {
     private lateinit var bridge: NativeBridge
     lateinit var server: LocalServer
     val updater by lazy { Updater(this) }
+    val textEntry by lazy { TextEntry(this) }
     var pendingVoice = false
 
     @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
@@ -195,6 +196,7 @@ class MainActivity : Activity() {
     override fun onStop() { player.onStop(); web.onPause(); emit("lifecycle", JSONObject().put("state", "stop")); super.onStop() }
 
     override fun onDestroy() {
+        textEntry.dismiss()
         player.release()
         bridge.release()
         server.stop()

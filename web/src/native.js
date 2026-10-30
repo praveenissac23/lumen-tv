@@ -4,6 +4,8 @@
 
 const N = window.Native || null;
 export const isNative = !!N;
+// On the TV the video is drawn behind this page, so the page itself must be see-through.
+if (N) document.documentElement.classList.add('native');
 
 const listeners = {};
 export function on(evt, fn) { (listeners[evt] ||= []).push(fn); }
@@ -253,4 +255,17 @@ export function setSpeed(x) { if (N) N.setSpeed(x); else if (video) video.playba
 // ---- phone companion page (local web server on the TV) ----
 export function companion() { if (N) { try { return JSON.parse(N.companion()); } catch { return null; } } return { url: 'http://192.168.1.24:8899', pin: '4821' }; }
 export function showKeyboard() { if (N) N.showKeyboard(); }
+
+// Native search box (TextEntry.kt): the TV keyboard opens; holding the remote's mic button dictates.
+// Resolves with the text, or null if cancelled. Returns null when not running on the TV.
+let textWaiter = null;
+export function textInput(title, hint, initial = '') {
+  if (!N || !N.textInput) return null;
+  return new Promise((resolve) => {
+    if (textWaiter) textWaiter(null);
+    textWaiter = resolve;
+    N.textInput(title, hint, initial || '');
+  });
+}
+on('textinput', (d) => { const w = textWaiter; textWaiter = null; if (w) w(d && d.text ? String(d.text) : null); });
 export function installUpdate(url) { if (N && N.installUpdate) N.installUpdate(url); }

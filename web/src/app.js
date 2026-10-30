@@ -29,7 +29,7 @@ const stack = [];
 let current = null;           // { name, params, ctl }
 const appLayer = { root: null, onKey: appKey };
 
-export const app = { go, back, reload, ensureUnlocked, openVoice, current: () => current };
+export const app = { go, back, reload, ensureUnlocked, openVoice, askText: (q) => askText(q), current: () => current };
 
 function railHtml() {
   return `<nav id="rail" class="rail" data-group="rail" data-zone="rail">
@@ -185,14 +185,19 @@ function openVoice() {
   pushLayer(voiceLayer);
   v.classList.add('listening');
   if (!dev.voice) {
-    // This TV doesn't let apps use the microphone. Open search with the on-screen keyboard;
-    // the Dictate button there opens the Fire TV keyboard (hold Alexa to speak).
+    // Fire TV doesn't let apps use the microphone directly: open the native search box,
+    // where the Fire TV keyboard dictates while the remote's mic button is held.
     closeVoice();
-    if (current && current.name === 'search') { focus($('#sr-dictate') || $('.key')); return; }
-    go('search', { ime: true });
+    askText();
     return;
   }
   N.voiceStart();
+}
+const VOICE_HINT = 'Hold the microphone (Alexa) button on your remote and speak, or type with the keyboard. Then press Search.';
+function askText(initial = '') {
+  const p = N.textInput('Search Lumen TV', VOICE_HINT, initial);
+  if (!p) { go('search', { ime: true }); return; }
+  p.then((text) => { if (text) { if (player.mode) exitPlayer(); handleSpoken(text); } });
 }
 function closeVoice() {
   N.voiceStop();
@@ -204,7 +209,10 @@ N.on('voice', (d) => {
   const heard = $('#voice-heard');
   if (!voiceLayer || !heard) return;
   if (d.state === 'partial' || d.state === 'final') { heard.textContent = d.text; $('#voice').classList.add('has-text'); }
-  if (d.state === 'error') { heard.textContent = 'Didn’t catch that'; $('#voice-hint').textContent = 'Press the button and speak again.'; $('#voice').classList.remove('listening'); setTimeout(closeVoice, 1600); }
+  if (d.state === 'error') {
+    if (d.text && /isn’t available|permission/i.test(d.text) && N.isNative) { closeVoice(); askText(); return; }   // no usable microphone: use the keyboard box
+    heard.textContent = 'Didn’t catch that'; $('#voice-hint').textContent = 'Press the button and speak again.'; $('#voice').classList.remove('listening'); setTimeout(closeVoice, 1600);
+  }
   if (d.state === 'final') {
     const text = d.text;
     setTimeout(() => { closeVoice(); handleSpoken(text); }, 450);

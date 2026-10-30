@@ -28,6 +28,8 @@
 
 * { box-sizing: border-box; margin: 0; padding: 0; }
 html, body { width: 100%; height: 100%; overflow: hidden; background: #000; }
+/* TV: the video plays on a surface behind the page; any opaque page background hides the picture */
+html.native, html.native body { background: transparent; }
 body { font: 500 26px/1.35 'Schibsted Grotesk', system-ui, sans-serif; color: var(--text); -webkit-font-smoothing: antialiased; }
 .num, .ct-num, .numentry, .ep-num, .scrub .t { font-variant-numeric: tabular-nums; }
 button, input { font: inherit; color: inherit; border: 0; background: none; outline: none; text-align: left; }

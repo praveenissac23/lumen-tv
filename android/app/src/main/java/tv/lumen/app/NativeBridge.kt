@@ -39,8 +39,9 @@ class NativeBridge(private val act: MainActivity) {
     fun deviceInfo(): String {
         val pm = act.packageManager
         val fire = pm.hasSystemFeature("amazon.hardware.fire_tv") || Build.MODEL.startsWith("AFT")
-        val voice = SpeechRecognizer.isRecognitionAvailable(act) ||
-            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).resolveActivity(pm) != null
+        // Fire TV reports recognisers that apps can't actually use; it gets the native text box instead.
+        val voice = !fire && (SpeechRecognizer.isRecognitionAvailable(act) ||
+            Intent(RecognizerIntent.ACTION_RECOGNIZE_SPEECH).resolveActivity(pm) != null)
         return JSONObject()
             .put("fireTv", fire).put("voice", voice)
             .put("model", "${Build.MANUFACTURER} ${Build.MODEL}").put("version", BuildConfig.VERSION_NAME)
@@ -410,6 +411,14 @@ class NativeBridge(private val act: MainActivity) {
         val s = act.server
         val url = s.url() ?: return "null"
         return JSONObject().put("url", url).put("pin", s.pin).toString()
+    }
+
+    /** Native search box: the TV keyboard opens, and holding the remote's mic button dictates into it. */
+    @JavascriptInterface
+    fun textInput(title: String, hint: String, initial: String) = ui {
+        act.textEntry.show(title, hint, initial) { text ->
+            emit("textinput", JSONObject().put("text", text ?: JSONObject.NULL))
+        }
     }
 
     /** Opens the TV's on-screen keyboard (on Fire TV, holding the Alexa button there dictates text). */
