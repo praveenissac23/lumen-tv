@@ -5,11 +5,17 @@ import WebKit
 /// The page talks to this app through a small HTTP server on 127.0.0.1 (see Server.swift / Bridge.swift).
 final class RootView: NSView {
     override var isFlipped: Bool { true }          // top-left origin, like the web page
-    override func layout() { super.layout(); App.shared?.player?.layout() }
+    override func layout() { super.layout(); App.setViewSize(bounds.size); App.shared?.player?.layout() }
 }
 
 final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDelegate {
     static var shared: App!
+
+    // Window size in points, readable from the server threads without waiting on the main thread.
+    private static let sizeLock = NSLock()
+    private static var _viewSize = CGSize(width: 1280, height: 720)
+    static var viewSize: CGSize { sizeLock.lock(); defer { sizeLock.unlock() }; return _viewSize }
+    static func setViewSize(_ s: CGSize) { sizeLock.lock(); _viewSize = s; sizeLock.unlock() }
 
     var window: NSWindow!
     var web: WKWebView!

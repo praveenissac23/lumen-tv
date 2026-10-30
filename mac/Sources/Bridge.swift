@@ -15,6 +15,7 @@ final class Bridge {
     private let updater = Updater()
 
     private func emit(_ e: String, _ d: [String: Any]) { App.shared.emit(e, d) }
+    private func ui(_ f: @escaping () -> Void) { DispatchQueue.main.async(execute: f) }
     @discardableResult private func main<T>(_ f: () -> T) -> T { Thread.isMainThread ? f() : DispatchQueue.main.sync(execute: f) }
     private func put(_ id: Int, _ body: String) { lock.lock(); bodies[id] = body; lock.unlock() }
     private func json(_ o: Any) -> String {
@@ -34,12 +35,12 @@ final class Bridge {
         switch name {
         // ---------- device ----------
         case "deviceInfo":
-            let size = main { App.shared.web.bounds.size }
+            let size = App.viewSize
             return json(["fireTv": false, "voice": false, "desktop": true, "platform": "mac",
                          "model": "Mac", "version": App.version, "versionCode": App.build,
                          "cssW": size.width, "cssH": size.height])
         case "viewSize":
-            let size = main { App.shared.web.bounds.size }
+            let size = App.viewSize
             return json(["w": size.width, "h": size.height])
         case "exit":
             DispatchQueue.main.async { NSApp.terminate(nil) }
@@ -124,22 +125,22 @@ final class Bridge {
         case "play":
             let url = s(0)
             let opts = (try? JSONSerialization.jsonObject(with: Data(s(1).utf8))) as? [String: Any] ?? [:]
-            main { App.shared.player?.play(url, opts: opts) }
+            ui { App.shared.player?.play(url, opts: opts) }
             return nil
-        case "stop": main { App.shared.player?.stop() }; return nil
-        case "pause": main { App.shared.player?.pause(true) }; return nil
-        case "resume": main { App.shared.player?.pause(false) }; return nil
-        case "seekBy": let v = n(0); main { App.shared.player?.seekBy(v) }; return nil
-        case "seekTo": let v = n(0); main { App.shared.player?.seekTo(v) }; return nil
+        case "stop": ui { App.shared.player?.stop() }; return nil
+        case "pause": ui { App.shared.player?.pause(true) }; return nil
+        case "resume": ui { App.shared.player?.pause(false) }; return nil
+        case "seekBy": let v = n(0); ui { App.shared.player?.seekBy(v) }; return nil
+        case "seekTo": let v = n(0); ui { App.shared.player?.seekTo(v) }; return nil
         case "setRect":
             let r = (try? JSONSerialization.jsonObject(with: Data(s(0).utf8))) as? [String: Any]
-            main { App.shared.player?.setRect(r) }
+            ui { App.shared.player?.setRect(r) }
             return nil
-        case "setResize": let m = s(0); main { App.shared.player?.setResize(m) }; return nil
-        case "setBuffer": let v = Int(n(0)); main { App.shared.player?.setBuffer(v) }; return nil
-        case "setSpeed": let v = n(0); main { App.shared.player?.setSpeed(v) }; return nil
+        case "setResize": let m = s(0); ui { App.shared.player?.setResize(m) }; return nil
+        case "setBuffer": let v = Int(n(0)); ui { App.shared.player?.setBuffer(v) }; return nil
+        case "setSpeed": let v = n(0); ui { App.shared.player?.setSpeed(v) }; return nil
         case "tracks": return main { App.shared.player?.tracks() } ?? "{\"audio\":[],\"text\":[]}"
-        case "selectTrack": let (t, i) = (s(0), s(1)); main { App.shared.player?.selectTrack(t, i) }; return nil
+        case "selectTrack": let (t, i) = (s(0), s(1)); ui { App.shared.player?.selectTrack(t, i) }; return nil
 
         // ---------- other apps ----------
         case "apps":
@@ -162,7 +163,7 @@ final class Bridge {
             return "true"
         case "copy":
             let t = s(0)
-            main { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(t, forType: .string) }
+            ui { NSPasteboard.general.clearContents(); NSPasteboard.general.setString(t, forType: .string) }
             return nil
         case "openUrl":
             if let u = URL(string: s(0)) { DispatchQueue.main.async { NSWorkspace.shared.open(u) } }

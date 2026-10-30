@@ -66,9 +66,12 @@ final class Player {
 
     func pause(_ p: Bool) { if p { if vlc.isPlaying { vlc.pause() } } else { vlc.play() } }
 
-    func seekBy(_ ms: Double) { seekTo(Double(vlc.time.intValue) + ms) }
+    private var nowMs: Int32 { let t: VLCTime? = vlc.time; return t?.intValue ?? 0 }
+    private var lengthMs: Int32 { let l: VLCTime? = vlc.media?.length; return l?.intValue ?? 0 }
 
-    func seekTo(_ ms: Double) { vlc.time = VLCTime(int: Int32(max(0, ms))) }
+    func seekBy(_ ms: Double) { guard vlc.media != nil else { return }; seekTo(Double(nowMs) + ms) }
+
+    func seekTo(_ ms: Double) { guard vlc.media != nil else { return }; vlc.time = VLCTime(int: Int32(max(0, min(ms, 2_000_000_000)))) }
 
     func setRect(_ r: [String: Any]?) { rect = r; layout() }
 
@@ -155,8 +158,7 @@ final class Player {
         if vlc.isPlaying {
             tick += 1
             if tick % 2 == 0 {
-                let dur = Int(vlc.media?.length.intValue ?? 0)
-                emit("progress", ["pos": Int(vlc.time.intValue), "dur": max(0, dur)])
+                emit("progress", ["pos": Int(nowMs), "dur": max(0, Int(lengthMs))])
             }
             let count = vlc.audioTrackIndexes.count + vlc.videoSubTitlesIndexes.count
             if count != lastTrackCount { lastTrackCount = count; emit("tracks", ["changed": true]) }
