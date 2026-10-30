@@ -43,7 +43,8 @@ cat build.log
 test -x "$APP/Contents/MacOS/LumenTV"
 
 # 3. Bundle
-ditto "$SLICE/VLCKit.framework" "$APP/Contents/Frameworks/VLCKit.framework"
+ditto --arch arm64 "$SLICE/VLCKit.framework" "$APP/Contents/Frameworks/VLCKit.framework"   # Apple-chip code only
+file "$APP/Contents/Frameworks/VLCKit.framework/VLCKit"
 ditto "$ROOT/build/web" "$APP/Contents/Resources/web"
 cp shim.js "$APP/Contents/Resources/shim.js"
 sed "s/__BUILD__/$BUILD/g" Info.plist > "$APP/Contents/Info.plist"
