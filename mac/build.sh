@@ -28,19 +28,19 @@ echo "::notice title=VLCKit::$(ls "$SLICE" | tr '\n' ' ') | $(file -b "$SLICE/VL
 # 2. Compile
 APP="build/Lumen TV.app"
 rm -rf build && mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Frameworks"
-set +e
-swiftc -O -swift-version 5 -target arm64-apple-macos11.0 \
+if ! swiftc -O -swift-version 5 -target arm64-apple-macos11.0 \
   -import-objc-header Bridging.h -F "$SLICE" -Xcc -F -Xcc "$SLICE" \
   -framework VLCKit -framework Cocoa -framework WebKit -lsqlite3 \
   -Xlinker -rpath -Xlinker @executable_path/../Frameworks \
-  Sources/*.swift -o "$APP/Contents/MacOS/LumenTV" 2>&1 | tee build.log
-st=${PIPESTATUS[0]}
-set -e
-if [ "$st" != "0" ]; then
-  grep -E "error:|Undefined symbol|ld: |_OBJC_CLASS_|referenced from" build.log | head -25 > errors.txt || true
+  Sources/*.swift -o "$APP/Contents/MacOS/LumenTV" > build.log 2>&1; then
+  cat build.log
+  grep -E "error:|Undefined symbol|ld: |referenced from" build.log | head -25 > errors.txt || true
   i=0; while IFS= read -r line; do i=$((i+1)); echo "::error title=swift $i::$line"; done < errors.txt
+  trap - ERR
   exit 1
 fi
+cat build.log
+test -x "$APP/Contents/MacOS/LumenTV"
 
 # 3. Bundle
 ditto "$SLICE/VLCKit.framework" "$APP/Contents/Frameworks/VLCKit.framework"

@@ -158,7 +158,7 @@ final class Player {
                 let dur = Int(vlc.media?.length.intValue ?? 0)
                 emit("progress", ["pos": Int(vlc.time.intValue), "dur": max(0, dur)])
             }
-            let count = (vlc.audioTrackIndexes?.count ?? 0) + (vlc.videoSubTitlesIndexes?.count ?? 0)
+            let count = vlc.audioTrackIndexes.count + vlc.videoSubTitlesIndexes.count
             if count != lastTrackCount { lastTrackCount = count; emit("tracks", ["changed": true]) }
             let vs = vlc.videoSize
             if vs != lastVideoSize { lastVideoSize = vs; layout() }
