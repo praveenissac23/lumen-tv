@@ -10,3 +10,4 @@ android/app/src/main/assets/
 # signing key comes from the repository secret
 android/app/lumen.jks
 *.jks
+__pycache__/

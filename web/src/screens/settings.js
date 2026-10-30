@@ -1,5 +1,6 @@
 // Settings: playlists, parental control, categories, playback, voice and remote, guide.
-import { C, testXtream, refresh, refreshEpg, loadFromCache, resetProgrammeIndex } from '../data.js';
+import { C, testXtream, refresh, refreshEpg, loadFromCache, clearEpgCache } from '../data.js';
+import { epgInfo } from '../epg.js';
 import { S, set, setting, upsertPlaylist, removePlaylist, setLocked, isLocked, setHidden, isHidden, activePlaylist, flush, toggleLang, moveLang, togglePin } from '../store.js';
 import { LANGS, langById, langItems } from '../languages.js';
 import { SUB_LANGS, langName } from '../subs.js';
@@ -186,7 +187,7 @@ export class SettingsScreen {
   guide() {
     const o = setting('epgOffsetHours') || 0;
     return `<h1>TV guide</h1>
-      ${this.row('Refresh guide now', icon('refresh'), 'epg', '', 'The guide also refreshes every 6 hours')}
+      ${this.row('Refresh guide now', icon('refresh'), 'epg', '', (() => { const i = epgInfo(); return i.importing ? 'Downloading the guide now…' : i.count ? `${(+i.count).toLocaleString()} programmes, updated ${new Date(+i.importedAt).toLocaleString()}` : 'No guide loaded yet. It also refreshes every 6 hours'; })())}
       ${this.row('Guide time shift', o === 0 ? 'No shift' : `${o > 0 ? '+' : ''}${o} h`, 'pick', 'epgOffsetHours', 'Use this if programme times are off by whole hours')}
       ${this.row('Start screen', { home: 'Home', live: 'Live TV', guide: 'TV guide' }[setting('startScreen') || 'home'], 'pick', 'startScreen')}`;
   }
@@ -249,7 +250,7 @@ export class SettingsScreen {
       if (!(await this.app.ensureUnlocked(kind, id))) return;
       setLocked(kind, id, !isLocked(kind, id)); this.repaint(btn); return;
     }
-    if (a === 'hide') { const [kind, id] = arg.split(':'); setHidden(kind, id, !isHidden(kind, id)); resetProgrammeIndex(); this.repaint(btn); return; }
+    if (a === 'hide') { const [kind, id] = arg.split(':'); setHidden(kind, id, !isHidden(kind, id)); this.repaint(btn); return; }
     if (a === 'pin') {
       const ok = await pinPad({ title: 'Enter current PIN', subtitle: 'To change your PIN', check: (v) => v === S.pin });
       if (!ok) return focus(btn);
@@ -275,7 +276,7 @@ export class SettingsScreen {
       }[arg];
       const cur = setting(arg) ?? choices[0][0];
       const v = await sheet({ title: btn.querySelector('b').textContent, options: choices.map(([val, label]) => ({ label, value: String(val), on: String(cur) === String(val) })), focusIndex: Math.max(0, choices.findIndex(([val]) => String(val) === String(cur))) });
-      if (v != null) { setting(arg, arg === 'epgOffsetHours' ? +v : v); if (arg === 'epgOffsetHours') resetProgrammeIndex(); if (arg === 'uiSize' && window.__fit) window.__fit(); }
+      if (v != null) { setting(arg, arg === 'epgOffsetHours' ? +v : v); if (arg === 'epgOffsetHours') clearEpgCache(); if (arg === 'uiSize' && window.__fit) window.__fit(); }
       this.repaint(btn); return;
     }
     if (a === 'addx' || (a === 'edit' && arg)) return this.addXtream(btn);
@@ -346,7 +347,6 @@ export class SettingsScreen {
     try {
       if (!loadFromCache()) await refresh(() => {});
       else refresh(() => {}).catch(() => {});
-      resetProgrammeIndex();
       toast(`${C.live.length} channels ready`);
     } catch (e) {
       toast(`Couldn’t load the playlist: ${e.message}`, 'err');
@@ -376,7 +376,7 @@ export class SettingsScreen {
 
   async doRefresh(btn) {
     toast('Refreshing channels');
-    try { await refresh(() => {}); resetProgrammeIndex(); toast(`Updated: ${C.live.length} channels, ${C.movie.length} films, ${C.series.length} series`); }
+    try { await refresh(() => {}); toast(`Updated: ${C.live.length} channels, ${C.movie.length} films, ${C.series.length} series`); }
     catch (e) { toast(`Refresh failed: ${e.message}`, 'err'); }
     this.show('playlists'); focus(this.view.querySelector('[data-act="refresh"]'));
   }

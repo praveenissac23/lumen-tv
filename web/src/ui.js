@@ -1,5 +1,7 @@
 // Shared UI pieces: icons, artwork, toast, dialogs, virtual list.
-import { esc, el, initials, tint, $ } from './util.js';
+import { esc, el, initials, tint, $, hhmm } from './util.js';
+import { isNative } from './native.js';
+import { C, nowNext } from './data.js';
 import { pushLayer, popLayer, focus, focusFirst, focusables } from './nav.js';
 
 // ---------- icons (24px line icons, stroke = currentColor) ----------
@@ -49,20 +51,53 @@ export const icon = (name, cls = '') =>
   `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ''}</svg>`;
 
 // ---------- artwork ----------
+// On the TV, images go through the native thumbnail service (small JPEGs, cached on disk).
+export function imgUrl(url, w) {
+  if (!url) return '';
+  return isNative ? `https://thumb.lumen/?w=${w}&u=${encodeURIComponent(url)}` : url;
+}
 // Channel logo with a monogram fallback; real logos load lazily and replace it.
 export function logo(ch, size = '') {
   const t = tint(ch.name);
-  const img = ch.logo ? `<img loading="lazy" decoding="async" src="${esc(ch.logo)}" alt="" onerror="this.remove()">` : '';
+  const img = ch.logo ? `<img loading="lazy" decoding="async" src="${esc(imgUrl(ch.logo, size === 'lg' ? 300 : 128))}" alt="" onerror="this.remove()">` : '';
   return `<span class="logo ${size}" style="--la:${t.a};--lb:${t.b};--li:${t.ink}"><b>${esc(initials(ch.name))}</b>${img}</span>`;
 }
 
 // Poster: real image, or generated typographic artwork from the title.
 export function poster(item, landscape = false) {
   const t = tint(item.name);
-  const img = item.img ? `<img loading="lazy" decoding="async" src="${esc(item.img)}" alt="" onerror="this.remove()">` : '';
+  const img = item.img ? `<img loading="lazy" decoding="async" src="${esc(imgUrl(item.img, landscape ? 960 : 320))}" alt="" onerror="this.remove()">` : '';
   const words = item.name.split(' ');
   return `<span class="art ${landscape ? 'land' : ''}" style="--la:${t.a};--lb:${t.b};--li:${t.ink}">
     <span class="art-title">${esc(words.length > 4 ? words.slice(0, 4).join(' ') + '…' : item.name)}</span>${img}</span>`;
+}
+
+// ---------- now/next slots ----------
+// Guide data arrives asynchronously; these slots are re-rendered by patchNowSlots() on the 'epg' event.
+export function nowInner(ch, style) {
+  const nn = nowNext(ch);
+  const cur = nn && nn.now;
+  if (style === 'tile') return `<span class="ct-now">${esc(cur ? cur.t : nn ? 'No guide information' : '')}</span>${cur ? progressBar(cur.pct, 'thin') : ''}`;
+  if (style === 'row') return `<small>${esc(cur ? cur.t : '')}</small>${cur ? progressBar(cur.pct, 'thin') : ''}`;
+  if (style === 'time') return cur ? hhmm(cur.e) : '';
+  if (style === 'hero') return `<h1>${esc(cur ? cur.t : ch.name)}</h1>
+    ${cur ? `<div class="hero-time"><span>${hhmm(cur.s)}</span>${progressBar(cur.pct)}<span>${hhmm(cur.e)}</span><em>${minsLeft(cur.e)}</em></div>` : ''}
+    ${nn && nn.next ? `<p class="hero-next">Next at ${hhmm(nn.next.s)}: ${esc(nn.next.t)}</p>` : ''}`;
+  if (style === 'best') return `<span>${esc(cur ? 'Now: ' + cur.t : '')}</span>${cur ? progressBar(cur.pct) : ''}`;
+  return '';
+}
+function minsLeft(endSec) {
+  const m = Math.max(0, Math.round((endSec - Date.now() / 1000) / 60));
+  return m >= 60 ? `${Math.floor(m / 60)}h ${m % 60}m left` : `${m} min left`;
+}
+export function nowSlot(ch, style, cls = '') {
+  return `<span class="nn nn-${style} ${cls}" data-nn="${esc(ch.id)}" data-nns="${style}">${nowInner(ch, style)}</span>`;
+}
+export function patchNowSlots(root = document) {
+  for (const el of root.querySelectorAll('.nn')) {
+    const ch = C.byId.live.get(el.dataset.nn);
+    if (ch) el.innerHTML = nowInner(ch, el.dataset.nns);
+  }
 }
 
 export const stars = (r) => (r ? `<span class="rating">${icon('starFill')}${(+r).toFixed(1)}</span>` : '');
@@ -189,9 +224,9 @@ export class VList {
     this.top = -1;
     this.ensure(true);
   }
-  get rowsVisible() { return Math.ceil(this.host.offsetHeight / this.rowH) + 1; }
+  get rowsVisible() { return Math.min(Math.ceil(1080 / this.rowH) + 1, Math.ceil(this.host.offsetHeight / this.rowH) + 1); }
   ensure(force) {
-    const vis = Math.max(1, Math.floor(this.host.offsetHeight / this.rowH)); // fully visible rows
+    const vis = Math.max(1, Math.min(Math.floor(1080 / this.rowH), Math.floor(this.host.offsetHeight / this.rowH))); // fully visible rows
     let top = this.top < 0 ? 0 : this.top;
     if (this.index < top + 1) top = this.index - 1;
     if (this.index > top + vis - 2) top = this.index - vis + 2;
@@ -253,10 +288,10 @@ export class VGrid {
     this.track.style.height = Math.ceil(items.length / this.cols) * this.cellH + 'px';
     this.topRow = -1; this.ensure(true);
   }
-  get rowsVisible() { return Math.ceil(this.host.offsetHeight / this.cellH); }
+  get rowsVisible() { return Math.min(Math.ceil(1080 / this.cellH) + 1, Math.ceil(this.host.offsetHeight / this.cellH)); }
   ensure(force) {
     const row = Math.floor(this.index / this.cols);
-    const vis = Math.max(1, Math.floor(this.host.offsetHeight / this.cellH));
+    const vis = Math.max(1, Math.min(Math.floor(1080 / this.cellH), Math.floor(this.host.offsetHeight / this.cellH)));
     let top = this.topRow < 0 ? 0 : this.topRow;
     if (row < top) top = row;
     if (row > top + vis - 1) top = row - vis + 1;

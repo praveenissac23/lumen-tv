@@ -3,7 +3,8 @@ import json, time, random
 from urllib.parse import urlparse, parse_qs
 
 random.seed(7)
-N_LIVE, N_VOD, N_SERIES = 4000, 6000, 900
+import os
+N_LIVE, N_VOD, N_SERIES = (20000, 50000, 3000) if os.environ.get("BIG") else (4000, 6000, 900)
 LCATS = ['UK | News', 'UK | Sports', 'AE | Arabic', 'IN | Malayalam', 'IN | Hindi', 'US | Entertainment', 'Kids', 'Documentary', 'XXX Adult']
 WORDS = ['Prime', 'Star', 'Nova', 'Delta', 'Sky', 'One', 'Max', 'Gold', 'Plus', 'Live', 'Arena', 'Vision', 'Asia', 'Gulf', 'Cinema']
 

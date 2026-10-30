@@ -1,5 +1,6 @@
 // Playlist sources (Xtream Codes API and M3U), catalogue cache and EPG lookups.
-import { http, xmltv, cacheRead, cacheWrite } from './native.js';
+import { http, catalog, cacheRead, cacheWrite } from './native.js';
+import { setLocalEpg, importEpg, nowNext as epgNowNext, progs as epgProgs, clearEpgCache, searchProgrammes } from './epg.js';
 import { norm, cleanName, now, bsearch, tagOf, qualityOf } from './util.js';
 import { activePlaylist, S, setting } from './store.js';
 import { demoCatalog, demoEpg } from './demo.js';
@@ -9,46 +10,86 @@ export const C = {
   source: null,
   live: [], movie: [], series: [],
   cats: { live: [], movie: [], series: [] },
+  catMap: { live: new Map(), movie: new Map(), series: new Map() },
   byId: { live: new Map(), movie: new Map(), series: new Map() },
-  epg: {},            // epgId -> [[start, end, title, desc], ...] sorted
+  byEpg: new Map(),   // epg channel id -> first live channel using it
   info: {},           // account info for settings screen
   updatedAt: 0,
 };
 
 const ADULT = /\bxxx\b|\badult|18\s*\+|\bporn/i;
 
-function hydrate(raw) {
+// Per-section hydration: normalise names for search and index by id.
+function hydrateSection(k, items) {
+  C[k] = items || [];
+  C.byId[k] = new Map();
+  for (const it of C[k]) { it.n = norm(it.name); C.byId[k].set(String(it.id), it); }
+  if (k === 'live') { C.byEpg = new Map(); for (const it of C[k]) if (it.epg && !C.byEpg.has(it.epg)) C.byEpg.set(it.epg, it); }
+}
+function hydrateCats(cats) {
   for (const k of ['live', 'movie', 'series']) {
-    C[k] = raw[k] || [];
-    C.byId[k] = new Map();
-    for (const it of C[k]) { it.n = norm(it.name); C.byId[k].set(String(it.id), it); }
-    C.cats[k] = raw.cats?.[k] || [];
-    for (const c of C.cats[k]) c.adult = ADULT.test(c.name);
+    C.cats[k] = (cats && cats[k]) || [];
+    C.catMap[k] = new Map(C.cats[k].map((c) => [c.id, c]));
+    for (const c of C.cats[k]) c.adult = ADULT.test(c.raw || c.name);
   }
+}
+function hydrate(raw) {
+  hydrateCats(raw.cats);
+  for (const k of ['live', 'movie', 'series']) hydrateSection(k, raw[k]);
   C.info = raw.info || {};
   C.updatedAt = raw.updatedAt || 0;
   C.ready = true;
 }
 
-function serialise() {
-  const strip = (arr) => arr.map(({ n, ...rest }) => rest);
-  return JSON.stringify({ live: strip(C.live), movie: strip(C.movie), series: strip(C.series), cats: C.cats, info: C.info, updatedAt: C.updatedAt });
+// Cache files: meta (small) + one file per section, so the home screen can show
+// channels before films and series are parsed.
+const strip = (arr) => arr.map(({ n, ...rest }) => rest);
+function writeSection(pl, k) { cacheWrite(`cat-${k}:${pl.id}`, JSON.stringify(strip(C[k]))); }
+function writeMeta(pl) { cacheWrite('cat-meta:' + pl.id, JSON.stringify({ cats: C.cats, info: C.info, updatedAt: C.updatedAt, finished: pl.type !== 'xtream', counts: { live: C.live.length, movie: C.movie.length, series: C.series.length } })); }
+// Section files hold compact provider records (Xtream) or finished items (M3U).
+function readSection(pl, kind, finished) {
+  const raw = readJson(`cat-${kind}:${pl.id}`, []);
+  return finished ? raw : raw.map((o) => finishItem(o, kind)).filter(Boolean);
+}
+function readJson(key, fallback) {
+  const raw = cacheRead(key);
+  if (!raw) return fallback;
+  try { return JSON.parse(raw); } catch { return fallback; }
 }
 
 // ---------- boot: cache first, network second ----------
-export function loadFromCache() {
+// Returns true when channels are usable. Films and series are parsed afterwards
+// (onMore is called when they are in), so start-up stays quick on big playlists.
+export function loadFromCache(onMore) {
   const pl = activePlaylist();
   if (!pl) {
     hydrate(demoCatalog());
-    C.epg = demoEpg(C.live);
+    setLocalEpg(demoEpg(C.live));
     C.source = { type: 'demo', name: 'Demo channels' };
     return true;
   }
   C.source = pl;
-  const raw = cacheRead('cat:' + pl.id);
-  if (!raw) return false;
-  try { hydrate(JSON.parse(raw)); } catch { return false; }
-  try { C.epg = JSON.parse(cacheRead('epg:' + pl.id) || '{}'); } catch { C.epg = {}; }
+  const meta = readJson('cat-meta:' + pl.id, null);
+  if (!meta) return false;
+  hydrateCats(meta.cats);
+  C.info = meta.info || {};
+  C.updatedAt = meta.updatedAt || 0;
+  const live = readSection(pl, 'live', meta.finished);
+  live.forEach((ch, i) => { if (!ch.num) ch.num = i + 1; });
+  hydrateSection('live', live);
+  if (!C.live.length) return false;
+  C.ready = true;
+  // films and series a moment later, off the critical path
+  setTimeout(() => {
+    hydrateSection('movie', readSection(pl, 'movie', meta.finished));
+    setTimeout(() => {
+      hydrateSection('series', readSection(pl, 'series', meta.finished));
+      const want = meta.counts || {};
+      const missing = (want.movie && !C.movie.length) || (want.series && !C.series.length);
+      if (missing) C.updatedAt = 0;   // a section file is gone: fetch again
+      onMore && onMore(missing ? 'missing' : 'vod');
+    }, 0);
+  }, 50);
   return true;
 }
 
@@ -61,7 +102,7 @@ export async function refresh(onPartial) {
   if (pl.type === 'xtream') await refreshXtream(pl, onPartial);
   else await refreshM3u(pl, onPartial);
   C.updatedAt = Date.now();
-  cacheWrite('cat:' + pl.id, serialise());
+  writeMeta(pl);
   refreshEpg(pl).then(() => onPartial && onPartial('epg')).catch(() => {});
 }
 
@@ -83,6 +124,48 @@ export async function testXtream(pl) {
   return r;
 }
 
+// Big lists are streamed natively into a compact cache file (see Catalog.kt).
+// In a browser the JSON is fetched and reduced here instead.
+async function fetchList(pl, action, kind) {
+  const url = xApi(pl, '&action=' + action);
+  const key = `cat-${kind}:${pl.id}`;
+  const nativeJob = catalog(url, kind, key);
+  let raw;
+  if (nativeJob) { await nativeJob; raw = readJson(key, []); }
+  else {
+    const arr = JSON.parse(await http(url, { timeout: 120000 }));
+    raw = (Array.isArray(arr) ? arr : []).map((o) => compactXtream(o, kind));
+  }
+  if (!nativeJob) cacheWrite(key, JSON.stringify(raw));   // native already wrote the file
+  return raw.map((o) => finishItem(o, kind)).filter(Boolean);
+}
+
+const XF = {
+  live: { stream_id: 'id', num: 'num', name: 'name', category_id: 'cat', stream_icon: 'logo', epg_channel_id: 'epg', tv_archive: 'arch', tv_archive_duration: 'archDays' },
+  movie: { stream_id: 'id', name: 'name', category_id: 'cat', stream_icon: 'img', rating_5based: 'r5', rating: 'r', year: 'year', releaseDate: 'date', added: 'added', container_extension: 'ext' },
+  series: { series_id: 'id', name: 'name', category_id: 'cat', cover: 'img', rating_5based: 'r5', releaseDate: 'date', release_date: 'date', last_modified: 'added', plot: 'plot', genre: 'genre' },
+};
+function compactXtream(o, kind) {
+  const out = {};
+  for (const [from, to] of Object.entries(XF[kind])) if (o[from] != null && o[from] !== '') out[to] = o[from];
+  return out;
+}
+// Compact record -> the item shape the screens use.
+function finishItem(o, kind) {
+  if (o.id == null || !o.name) return null;
+  const rawName = String(o.name);
+  if (kind === 'live') {
+    return { id: o.id, num: +o.num || 0, name: cleanName(rawName), tag: tagOf(rawName), cat: String(o.cat ?? ''), logo: o.logo || '', epg: o.epg || '',
+      arch: +o.arch ? (+o.archDays || 3) : 0 };
+  }
+  if (kind === 'movie') {
+    return { id: o.id, name: noYear(cleanName(rawName)), tag: tagOf(rawName), q: qualityOf(rawName), cat: String(o.cat ?? ''), img: o.img || '',
+      rating: +o.r5 || (+o.r ? +o.r / 2 : 0), year: yearOf(rawName, o.year || o.date), added: +o.added || 0, ext: o.ext || 'mp4' };
+  }
+  return { id: o.id, name: noYear(cleanName(rawName)), tag: tagOf(rawName), cat: String(o.cat ?? ''), img: o.img || '', rating: +o.r5 || 0,
+    year: yearOf(rawName, o.date), added: +o.added || 0, plot: String(o.plot || '').slice(0, 300), genre: o.genre || '' };
+}
+
 async function refreshXtream(pl, onPartial) {
   const acc = await testXtream(pl);
   const ui = acc.user_info || {};
@@ -90,32 +173,17 @@ async function refreshXtream(pl, onPartial) {
     status: ui.status, expires: ui.exp_date ? +ui.exp_date : null, maxConn: ui.max_connections,
     active: ui.active_cons, tz: acc.server_info?.timezone || null,
   };
-  const [lc, ls] = await Promise.all([xJson(pl, '&action=get_live_categories'), xJson(pl, '&action=get_live_streams')]);
-  const cats = { live: mapCats(lc), movie: C.cats.movie, series: C.cats.series };
-  const live = (ls || []).map((s, i) => ({
-    id: s.stream_id, num: +s.num || i + 1, name: cleanName(s.name), tag: tagOf(s.name), cat: String(s.category_id ?? ''),
-    logo: s.stream_icon || '', epg: s.epg_channel_id || '', arch: +s.tv_archive ? +s.tv_archive_duration || 3 : 0,
-  }));
-  hydrate({ live, movie: C.movie, series: C.series, cats, info: C.info, updatedAt: C.updatedAt });
+  const [lc, live] = await Promise.all([xJson(pl, '&action=get_live_categories'), fetchList(pl, 'get_live_streams', 'live')]);
+  live.forEach((ch, i) => { if (!ch.num) ch.num = i + 1; });
+  hydrateCats({ live: mapCats(lc), movie: C.cats.movie, series: C.cats.series });
+  hydrateSection('live', live);
+  C.ready = true;
   onPartial && onPartial('live');
 
-  const [vc, vs, sc, ss] = await Promise.all([
-    xJson(pl, '&action=get_vod_categories'), xJson(pl, '&action=get_vod_streams'),
-    xJson(pl, '&action=get_series_categories'), xJson(pl, '&action=get_series'),
-  ]);
-  cats.movie = mapCats(vc);
-  cats.series = mapCats(ss && sc ? sc : []);
-  const movie = (vs || []).map((v) => ({
-    id: v.stream_id, name: noYear(cleanName(v.name)), tag: tagOf(v.name), q: qualityOf(v.name), cat: String(v.category_id ?? ''), img: v.stream_icon || '',
-    rating: +v.rating_5based || (+v.rating ? +v.rating / 2 : 0), year: yearOf(v.name, v.year || v.releaseDate),
-    added: +v.added || 0, ext: v.container_extension || 'mp4',
-  }));
-  const series = (ss || []).map((v) => ({
-    id: v.series_id, name: noYear(cleanName(v.name)), tag: tagOf(v.name), cat: String(v.category_id ?? ''), img: v.cover || '',
-    rating: +v.rating_5based || 0, year: yearOf(v.name, v.releaseDate || v.release_date),
-    added: +v.last_modified || 0, plot: (v.plot || '').slice(0, 300), genre: v.genre || '',
-  }));
-  hydrate({ live: C.live, movie, series, cats, info: C.info, updatedAt: C.updatedAt });
+  const [vc, sc] = await Promise.all([xJson(pl, '&action=get_vod_categories'), xJson(pl, '&action=get_series_categories')]);
+  hydrateCats({ live: C.cats.live, movie: mapCats(vc), series: mapCats(sc) });
+  hydrateSection('movie', await fetchList(pl, 'get_vod_streams', 'movie'));
+  hydrateSection('series', await fetchList(pl, 'get_series', 'series'));
   onPartial && onPartial('vod');
 }
 
@@ -164,7 +232,8 @@ async function refreshM3u(pl, onPartial) {
   const text = await http(pl.url, { timeout: 60000 });
   const parsed = parseM3u(text);
   if (!pl.epgUrl && parsed.epgUrl) pl.epgUrl = parsed.epgUrl;
-  hydrate(parsed);
+  hydrate({ ...parsed, info: C.info, updatedAt: C.updatedAt });
+  for (const k of ['live', 'movie', 'series']) writeSection(pl, k);
   onPartial && onPartial('live');
   onPartial && onPartial('vod');
 }
@@ -227,66 +296,19 @@ function m3uSeriesInfo(id) {
 }
 
 // ---------- EPG ----------
-export async function refreshEpg(pl, force = false) {
-  const age = Date.now() - (+cacheRead('epgAt:' + pl.id) || 0);
-  if (!force && age < 6 * 3600 * 1000 && Object.keys(C.epg).length) return;
-  const url = pl.type === 'xtream'
+export function epgUrlFor(pl) {
+  return pl.type === 'xtream'
     ? `${xBase(pl)}/xmltv.php?username=${encodeURIComponent(pl.user)}&password=${encodeURIComponent(pl.pass)}`
     : pl.epgUrl;
-  if (!url) return;
-  const t = now();
-  await xmltv(url, 'epg:' + pl.id, t - 3 * 86400, t + 2 * 86400);
-  C.epg = JSON.parse(cacheRead('epg:' + pl.id) || '{}');
-  cacheWrite('epgAt:' + pl.id, String(Date.now()));
-  searchProgIndex = null;
 }
-
-const off = () => (setting('epgOffsetHours') || 0) * 3600;
-
-export function progs(ch) {
-  const list = ch && C.epg[ch.epg || ch.id];
-  if (!list || !list.length) return [];
-  const o = off();
-  return o ? list.map((p) => [p[0] + o, p[1] + o, p[2], p[3]]) : list;
+export async function refreshEpg(pl, force = false) {
+  const url = epgUrlFor(pl);
+  if (!url) return 0;
+  return importEpg(url, C.live, { force });
 }
-
-// { now: {s,e,t,d,pct}, next: {...} } or null
-export function nowNext(ch, at = now()) {
-  const list = progs(ch);
-  if (!list.length) return null;
-  const i = bsearchArr(list, at);
-  const cur = i >= 0 && list[i][1] > at ? list[i] : null;
-  const nxt = list[cur ? i + 1 : Math.max(0, i + 1)] || null;
-  const mk = (p) => p && { s: p[0], e: p[1], t: p[2], d: p[3] || '', pct: Math.min(1, Math.max(0, (at - p[0]) / (p[1] - p[0]))) };
-  return { now: mk(cur), next: mk(nxt && nxt[0] >= at - 60 ? nxt : null) };
-}
-
-function bsearchArr(list, t) {
-  let lo = 0, hi = list.length - 1, ans = -1;
-  while (lo <= hi) { const m = (lo + hi) >> 1; if (list[m][0] <= t) { ans = m; lo = m + 1; } else hi = m - 1; }
-  return ans;
-}
-export { bsearch };
-
-// Programme index for master search (built lazily, next 24 h + last 3 days for catch-up)
-let searchProgIndex = null;
-export function programmeIndex() {
-  if (searchProgIndex) return searchProgIndex;
-  const t = now();
-  const out = [];
-  for (const ch of C.live) {
-    const list = progs(ch);
-    if (!list.length) continue;
-    const from = ch.arch ? t - ch.arch * 86400 : t - 3600;
-    for (const p of list) {
-      if (p[1] < from || p[0] > t + 86400) continue;
-      out.push({ ch, s: p[0], e: p[1], t: p[2], d: p[3] || '', n: norm(p[2]) });
-    }
-  }
-  searchProgIndex = out;
-  return out;
-}
-export function resetProgrammeIndex() { searchProgIndex = null; }
+export const nowNext = epgNowNext;
+export const progs = epgProgs;
+export { bsearch, clearEpgCache, searchProgrammes };
 
 // ---------- playback URLs ----------
 export function liveUrl(ch) {
@@ -357,7 +379,7 @@ export function itemsIn(kind, catId) {
   if (catId === '__recent') return S.recentLive.map((id) => C.byId.live.get(id)).filter(Boolean);
   return C[kind].filter((x) => x.cat === catId);
 }
-export function catOf(kind, id) { return C.cats[kind].find((c) => c.id === id) || null; }
+export function catOf(kind, id) { return C.catMap[kind].get(id) || null; }
 export function needsPin(kind, catId) {
   const c = catOf(kind, catId);
   if (!c) return false;

@@ -81,17 +81,64 @@ class NativeBridge(private val act: MainActivity) {
     @JavascriptInterface
     fun take(id: Int): String? = bodies.remove(id)
 
+    /** Streams a big Xtream list into a compact cache file; the body is then read with cacheRead(key). */
     @JavascriptInterface
-    fun xmltv(id: Int, url: String, key: String, from: Double, to: Double) {
+    fun catalog(id: Int, url: String, kind: String, key: String) {
         io.execute {
             try {
-                val (c, stream) = Net.open(url, 120000)
-                val json = try { stream.use { Xmltv.parse(it, from.toLong(), to.toLong()) } } finally { c.disconnect() }
-                write(key, json)
-                emit("xmltv", JSONObject().put("id", id).put("ok", true))
+                val n = Catalog.fetch(url, kind, file(key))
+                emit("catalog", JSONObject().put("id", id).put("ok", true).put("count", n))
             } catch (e: Exception) {
-                emit("xmltv", JSONObject().put("id", id).put("ok", false).put("error", e.message ?: "Guide download failed"))
+                emit("catalog", JSONObject().put("id", id).put("ok", false).put("error", e.message ?: "Download failed"))
             }
+        }
+    }
+
+    // ---------- programme guide (SQLite, see EpgStore) ----------
+    @JavascriptInterface
+    fun epgImport(id: Int, url: String, from: Double, to: Double, idsCsv: String) {
+        io.execute {
+            try {
+                val wanted = if (idsCsv.isBlank()) null else idsCsv.split(',').filter { it.isNotEmpty() }.toHashSet()
+                val (c, stream) = Net.open(url, 180000)
+                val n = try {
+                    stream.use { act.epg.import(it, from.toLong(), to.toLong(), wanted) { done ->
+                        emit("epg", JSONObject().put("state", "importing").put("count", done))
+                    } }
+                } finally { c.disconnect() }
+                emit("epg", JSONObject().put("id", id).put("state", "ready").put("ok", true).put("count", n))
+            } catch (e: Exception) {
+                emit("epg", JSONObject().put("id", id).put("state", "error").put("ok", false).put("error", e.message ?: "Guide download failed"))
+            }
+        }
+    }
+
+    @JavascriptInterface
+    fun epgInfo(): String = JSONObject().put("importedAt", act.epg.importedAt()).put("count", act.epg.count()).put("importing", act.epg.importing).toString()
+
+    private fun ids(csv: String) = csv.split(',').filter { it.isNotEmpty() }.take(200)
+
+    @JavascriptInterface
+    fun epgNow(id: Int, idsCsv: String, at: Double) {
+        io.execute {
+            try { bodies[id] = act.epg.nowNext(ids(idsCsv), at.toLong()).toString(); emit("call", JSONObject().put("id", id).put("ok", true)) }
+            catch (e: Exception) { emit("call", JSONObject().put("id", id).put("ok", false).put("error", e.message ?: "Guide error")) }
+        }
+    }
+
+    @JavascriptInterface
+    fun epgRange(id: Int, idsCsv: String, from: Double, to: Double) {
+        io.execute {
+            try { bodies[id] = act.epg.range(ids(idsCsv), from.toLong(), to.toLong()).toString(); emit("call", JSONObject().put("id", id).put("ok", true)) }
+            catch (e: Exception) { emit("call", JSONObject().put("id", id).put("ok", false).put("error", e.message ?: "Guide error")) }
+        }
+    }
+
+    @JavascriptInterface
+    fun epgSearch(id: Int, q: String, from: Double, to: Double, limit: Int) {
+        io.execute {
+            try { bodies[id] = act.epg.search(q, from.toLong(), to.toLong(), limit.coerceIn(1, 200)).toString(); emit("call", JSONObject().put("id", id).put("ok", true)) }
+            catch (e: Exception) { emit("call", JSONObject().put("id", id).put("ok", false).put("error", e.message ?: "Guide error")) }
         }
     }
 

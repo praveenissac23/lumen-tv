@@ -4,6 +4,7 @@ import android.util.Xml
 import org.json.JSONObject
 import org.xmlpull.v1.XmlPullParser
 import java.io.BufferedInputStream
+import java.io.File
 import java.io.InputStream
 import java.net.HttpURLConnection
 import java.net.URL
@@ -150,14 +151,15 @@ object Net {
 }
 
 /**
- * Streams an XMLTV guide and keeps only programmes inside [from, to].
- * Output JSON: {"channelId": [[start, stop, "title", "desc"], ...], ...} sorted by start.
+ * Streams an XMLTV guide and keeps only programmes inside [from, to] for the given channels.
+ * Output JSON file: {"channelId": [[start, stop, "title", "desc"], ...], ...} sorted by start.
  */
 object Xmltv {
     private class Prog(val s: Long, val e: Long, val t: String, val d: String)
     private val OFFSET = Regex("([+-])(\\d{2})(\\d{2})")
 
-    fun parse(input: InputStream, from: Long, to: Long): String {
+    /** Returns the number of programmes kept. */
+    fun parse(input: InputStream, from: Long, to: Long, wanted: Set<String>?, dest: File): Int {
         val parser = Xml.newPullParser()
         parser.setFeature(XmlPullParser.FEATURE_PROCESS_NAMESPACES, false)
         parser.setInput(input, null)
@@ -166,16 +168,20 @@ object Xmltv {
         var s = 0L; var e = 0L
         var title: String? = null; var desc: String? = null
         var keep = false
+        var total = 0
         var event = parser.eventType
         while (event != XmlPullParser.END_DOCUMENT) {
             if (event == XmlPullParser.START_TAG) {
                 when (parser.name) {
                     "programme" -> {
                         ch = parser.getAttributeValue(null, "channel")
-                        s = time(parser.getAttributeValue(null, "start"))
-                        e = time(parser.getAttributeValue(null, "stop"))
-                        if (e == 0L) e = s + 1800
-                        keep = ch != null && s > 0 && e >= from && s <= to
+                        keep = ch != null && (wanted == null || wanted.contains(ch))
+                        if (keep) {
+                            s = time(parser.getAttributeValue(null, "start"))
+                            e = time(parser.getAttributeValue(null, "stop"))
+                            if (e == 0L) e = s + 1800
+                            keep = s > 0 && e >= from && s <= to
+                        }
                         title = null; desc = null
                     }
                     "title" -> if (keep && title == null) title = parser.nextText()
@@ -183,34 +189,40 @@ object Xmltv {
                 }
             } else if (event == XmlPullParser.END_TAG && parser.name == "programme") {
                 if (keep && ch != null) {
-                    val d = desc ?: ""
-                    byCh.getOrPut(ch) { ArrayList() }.add(Prog(s, e, title ?: "", if (d.length > 300) d.substring(0, 300) else d))
+                    var d = desc ?: ""
+                    if (d.length > 160) d = d.substring(0, 160)
+                    byCh.getOrPut(ch) { ArrayList() }.add(Prog(s, e, title ?: "", d))
+                    total++
+                    if (total > 600000) break   // safety valve for absurd guides
                 }
                 keep = false
             }
             event = parser.next()
         }
-        val out = StringBuilder(1 shl 20)
-        out.append('{')
-        var first = true
-        for ((id, list) in byCh) {
-            list.sortBy { it.s }
-            if (!first) out.append(',')
-            first = false
-            out.append(JSONObject.quote(id)).append(":[")
-            list.forEachIndexed { i, p ->
-                if (i > 0) out.append(',')
-                out.append('[').append(p.s).append(',').append(p.e).append(',')
-                    .append(JSONObject.quote(p.t)).append(',').append(JSONObject.quote(p.d)).append(']')
+        val tmp = File(dest.path + ".tmp")
+        tmp.bufferedWriter(Charsets.UTF_8, 1 shl 16).use { out ->
+            out.write("{")
+            var first = true
+            for ((id, list) in byCh) {
+                list.sortBy { it.s }
+                if (!first) out.write(",")
+                first = false
+                out.write(JSONObject.quote(id)); out.write(":[")
+                list.forEachIndexed { i, p ->
+                    if (i > 0) out.write(",")
+                    out.write("["); out.write(p.s.toString()); out.write(","); out.write(p.e.toString()); out.write(",")
+                    out.write(JSONObject.quote(p.t)); out.write(","); out.write(JSONObject.quote(p.d)); out.write("]")
+                }
+                out.write("]")
             }
-            out.append(']')
+            out.write("}")
         }
-        out.append('}')
-        return out.toString()
+        if (!tmp.renameTo(dest)) { dest.delete(); tmp.renameTo(dest) }
+        return total
     }
 
     // "20261030013000 +0400" -> epoch seconds
-    private fun time(v: String?): Long {
+    fun time(v: String?): Long {
         if (v == null || v.length < 12) return 0
         return try {
             val cal = Calendar.getInstance(TimeZone.getTimeZone("UTC"))

@@ -227,6 +227,8 @@ with sync_playwright() as p:
         errs = []
         page.on('pageerror', lambda e: errs.append(str(e)))
         page.on('console', lambda m: m.type == 'error' and errs.append(m.text))
+        page.on('requestfailed', lambda r: errs.append('REQFAIL ' + r.url))
+        page.on('response', lambda r: r.status >= 400 and errs.append(f'HTTP {r.status} {r.url}'))
         ctx.add_init_script(f"if (!sessionStorage.getItem('seeded')) {{ localStorage.setItem('c:state', {json.dumps(json.dumps(SEED))}); sessionStorage.setItem('seeded', '1'); }}")
         page.goto('http://127.0.0.1:8765/index.html')
         page.wait_for_function("window.__bootMs !== undefined")

@@ -1,6 +1,6 @@
 // Master search across channels, programmes (EPG), films and series.
 // Tolerant of typos, quality tags, word order and spoken numbers.
-import { C, programmeIndex } from './data.js';
+import { C, searchProgrammes, needsPin } from './data.js';
 import { norm, now } from './util.js';
 import { S } from './store.js';
 
@@ -100,10 +100,7 @@ export function search(raw, { limit = 24 } = {}) {
     const ch = C.live.find((c) => c.num === parsed.number);
     if (ch) live = [[1200, ch], ...live.filter(([, c]) => c !== ch)];
   }
-  const t = now();
-  const progs = top(programmeIndex(), q, qt, limit * 2, (p) => (p.s <= t && p.e > t ? 80 : p.s > t ? 40 - Math.min(40, (p.s - t) / 3600) : 0))
-    .filter(([, p], i, arr) => arr.findIndex(([, x]) => x.ch === p.ch && x.s === p.s) === i)
-    .slice(0, limit);
+  const progs = [];
   const movie = top(C.movie, q, qt, limit);
   const series = top(C.series, q, qt, limit);
 
@@ -122,9 +119,37 @@ export function search(raw, { limit = 24 } = {}) {
   };
 }
 
+// Programmes on now, later or on catch-up, from the guide database (async; the
+// database does the matching, this ranks what comes back).
+export async function searchOnTv(raw, { limit = 24 } = {}) {
+  const parsed = parseSpoken(raw);
+  const q = parsed.q;
+  if (!q || q.length < 2 || parsed.number != null) return [];
+  const t = now();
+  const qt = q.split(' ').filter(Boolean);
+  let rows;
+  try { rows = await searchProgrammes(q, t - 8 * 3600, t + 36 * 3600, limit * 6); } catch { return []; }
+  const seen = new Set();
+  const out = [];
+  for (const r of rows) {
+    const ch = C.byEpg.get(r.key);
+    if (!ch || needsPin('live', ch.cat)) continue;
+    const k = ch.id + ':' + r.s;
+    if (seen.has(k)) continue;
+    seen.add(k);
+    if (r.e <= t && !ch.arch) continue; // ended and no catch-up: nothing to watch
+    const it = { ch, s: r.s, e: r.e, t: r.t, d: r.d, n: norm(r.t) };
+    let sc = score(it, q, qt) || 100;
+    sc += r.s <= t && r.e > t ? 80 : r.s > t ? 40 - Math.min(40, (r.s - t) / 3600) : 10;
+    out.push([sc, it]);
+  }
+  return out.sort((a, b) => b[0] - a[0]).slice(0, limit).map((x) => x[1]);
+}
+
 // Quick suggestions while typing (top names only)
-export function suggest(raw, n = 6) {
-  const r = search(raw, { limit: 6 });
+export function suggest(raw, n = 6) { return suggestFrom(search(raw, { limit: 6 }), n); }
+// Suggestions from results already computed (no second scan of the catalogue).
+export function suggestFrom(r, n = 6) {
   const names = [];
   for (const it of [...r.live, ...r.movie, ...r.series, ...r.progs]) {
     const name = it.name || it.t;

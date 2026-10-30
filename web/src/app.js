@@ -2,13 +2,13 @@
 import { $, esc, el, hhmm, now } from './util.js';
 import * as N from './native.js';
 import { initInput, pushLayer, popLayer, focus, focusFirst, clearLayers, topLayer } from './nav.js';
-import { C, loadFromCache, refresh, catalogueAge, needsPin, resetProgrammeIndex, testXtream } from './data.js';
+import { C, loadFromCache, refresh, catalogueAge, needsPin, testXtream } from './data.js';
 import { S, set, setting, sessionUnlocked, unlockSession, flush, upsertPlaylist } from './store.js';
-import { icon, toast, pinPad } from './ui.js';
+import { icon, toast, pinPad, patchNowSlots } from './ui.js';
 import { mountBackground, applyLook } from './look.js';
 import { startUpdateChecks } from './updates.js';
 import { search, parseSpoken } from './search.js';
-import { player, playLive, exit as exitPlayer, stopPreview } from './player.js';
+import { player, playLive, exit as exitPlayer, stopPreview, onEpg as playerEpg } from './player.js';
 import { HomeScreen } from './screens/home.js';
 import { LiveScreen } from './screens/live.js';
 import { GuideScreen } from './screens/guide.js';
@@ -226,7 +226,7 @@ N.on('remote', async (d) => {
     if (pl.type === 'xtream') { try { await testXtream(pl); } catch (e) { toast(`Couldn\u2019t connect: ${e.message}`, 'err'); return; } }
     upsertPlaylist(pl); set('active', pl.id); flush();
     toast('Loading channels from your new playlist');
-    try { await refresh(() => {}); resetProgrammeIndex(); toast(`${C.live.length} channels ready`); go('home', {}, { root: true }); }
+    try { await refresh(() => {}); toast(`${C.live.length} channels ready`); go('home', {}, { root: true }); }
     catch (e) { toast(`Couldn\u2019t load the playlist: ${e.message}`, 'err'); }
   }
 });
@@ -255,21 +255,43 @@ document.addEventListener('scroll', (e) => {
   else if (t === document && (scrollX || scrollY)) scrollTo(0, 0);
 }, true);
 
+// Guide answers arrive in batches: patch the slots on screen, then let the screen react.
+let epgTimer = null;
+document.addEventListener('epg', () => {
+  if (epgTimer) return;
+  epgTimer = setTimeout(() => {
+    epgTimer = null;
+    try {
+      patchNowSlots(document.getElementById('view'));
+      if (player.mode) playerEpg();
+      else if (current && current.ctl && current.ctl.onEpg) current.ctl.onEpg();
+    } catch (e) { console.warn('epg paint', e); }
+  }, 80);
+});
+N.on('epg', (d) => {
+  if (d.state === 'ready' && d.count) toast(`TV guide ready: ${d.count.toLocaleString()} programmes`);
+  else if (d.state === 'error') toast('Couldn’t download the TV guide', 'err');
+});
+
 function boot() {
   const t0 = performance.now();
   document.body.classList.toggle('lite', !!setting('lite'));
   initInput();
   mountShell();
-  const hasCache = loadFromCache();
+  // Channels load first so the screen appears at once; films and series follow a moment later.
+  const hasCache = loadFromCache((part) => {
+    if (part === 'missing') { refresh((p) => { if (p !== 'epg' && current && !player.mode) reload(); }).catch(() => {}); return; }
+    if (part === 'vod' && current && !player.mode && current.name !== 'live') reload();
+  });
   if (hasCache) start();
   else showLoading();
   const pl = S.playlists.find((p) => p.id === S.active);
   if (pl && (!hasCache || catalogueAge() > 4 * 3600 * 1000)) {
     refresh((part) => {
-      resetProgrammeIndex();
       if (!current) { start(); return; }
-      if (!player.mode && part !== 'epg') reload();
-      if (part === 'epg' && current && ['home', 'live', 'guide'].includes(current.name) && !player.mode) reload();
+      if (player.mode) return;
+      if (part === 'live' || part === 'vod') reload();
+      if (part === 'epg' && ['home', 'live', 'guide'].includes(current.name)) reload();
     }).catch((err) => {
       if (!current) { start(); }
       toast(`Couldn’t refresh ${pl.name}: ${err.message}`, 'err');

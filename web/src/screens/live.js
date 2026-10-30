@@ -3,7 +3,7 @@ import { C, nowNext, itemsIn, visibleCats, progs, needsPin, catOf } from '../dat
 import { S, isFav, toggleFav, setLocked, isLocked, setHidden, setting } from '../store.js';
 import { esc, hhmm, now, minutesLeft, debounce, dayLabel } from '../util.js';
 import { focus } from '../nav.js';
-import { icon, logo, progressBar, VList, toast, sheet } from '../ui.js';
+import { icon, logo, progressBar, VList, toast, sheet, nowSlot, patchNowSlots } from '../ui.js';
 import { preview, stopPreview, playLive, playCatchup } from '../player.js';
 import { rectOf } from './home.js';
 import { langCatEntries } from '../languages.js';
@@ -65,13 +65,12 @@ export class LiveScreen {
   }
 
   chRow(ch) {
-    const nn = nowNext(ch);
     const locked = needsPin('live', ch.cat);
     return `<button class="f ch-row">
       <span class="num">${ch.num}</span>${logo(ch, 'sm')}
       <span class="cr-main"><b>${esc(ch.name)}${isFav('live', ch.id) ? icon('heartFill', 'favmark') : ''}${ch.arch ? `<i class="cu-dot" title="Catch-up">${icon('history')}</i>` : ''}</b>
-      <small>${locked ? 'Locked' : esc(nn && nn.now ? nn.now.t : '')}</small>${nn && nn.now && !locked ? progressBar(nn.now.pct, 'thin') : ''}</span>
-      ${nn && nn.now && !locked ? `<span class="cr-time">${hhmm(nn.now.e)}</span>` : ''}</button>`;
+      ${locked ? '<small>Locked</small>' : nowSlot(ch, 'row')}</span>
+      ${locked ? '' : nowSlot(ch, 'time', 'cr-time')}</button>`;
   }
 
   async pickCat(id, focusChannels) {
@@ -101,6 +100,12 @@ export class LiveScreen {
 
   showInfo(ch) {
     this.infoCh = ch;
+    this.renderInfo(ch);
+    if (!needsPin('live', ch.cat)) this.previewDeb(ch); else stopPreview();
+  }
+
+  // Guide text for the focused channel; called again when guide data arrives.
+  renderInfo(ch) {
     const locked = needsPin('live', ch.cat);
     const nn = nowNext(ch);
     const t = now();
@@ -112,18 +117,24 @@ export class LiveScreen {
     const upcoming = list.slice(i + 1, i + 4);
     this.progRows = [...past, ...upcoming].map((p) => ({ s: p[0], e: p[1], t: p[2], d: p[3] }));
     const d = this.view.querySelector('#pv-detail');
+    const keepFocus = d.contains(document.activeElement) ? +document.activeElement.dataset.i : -1;
     d.innerHTML = locked ? `<div class="pv-locked">${icon('lock')}<p>This category is locked. Press OK and enter your PIN to watch.</p></div>` : `
       <div class="pv-ch">${logo(ch, 'md')}<div><b>${esc(ch.name)}</b><small>Channel ${ch.num}${ch.arch ? ` with ${ch.arch}-day catch-up` : ''}</small></div></div>
       ${nn && nn.now ? `<h1>${esc(nn.now.t)}</h1>
         <div class="hero-time"><span>${hhmm(nn.now.s)}</span>${progressBar(nn.now.pct)}<span>${hhmm(nn.now.e)}</span><em>${minutesLeft(nn.now.e)}</em></div>
-        ${nn.now.d ? `<p class="pv-desc">${esc(nn.now.d)}</p>` : ''}` : '<h1 class="muted">No guide information for this channel</h1>'}
+        ${nn.now.d ? `<p class="pv-desc">${esc(nn.now.d)}</p>` : ''}` : nn === null && !list.length ? '<h1 class="muted">Loading guide…</h1>' : '<h1 class="muted">No guide information for this channel</h1>'}
       ${this.progRows.length ? `<div class="pv-progs" data-group="progs">${this.progRows.map((p, k) => {
         const isPast = p.e <= t;
         return `<button class="f prog-row ${isPast ? 'past' : ''}" data-i="${k}" ${isPast ? 'data-cu="1"' : ''}>
           <span class="pr-time">${dayLabel(p.s) === 'Today' ? '' : dayLabel(p.s) + ' '}${hhmm(p.s)}</span><span class="pr-t">${esc(p.t)}</span>
           ${isPast ? `<span class="pr-cu">${icon('play')}Watch</span>` : ''}</button>`;
       }).join('')}</div>` : ''}`;
-    if (!locked) this.previewDeb(ch); else stopPreview();
+    if (keepFocus >= 0) { const b = d.querySelector(`.prog-row[data-i="${keepFocus}"]`) || d.querySelector('.prog-row'); if (b) focus(b); }
+  }
+
+  onEpg() {
+    patchNowSlots(this.view);
+    if (this.infoCh) this.renderInfo(this.infoCh);
   }
 
   startPreview(ch) {

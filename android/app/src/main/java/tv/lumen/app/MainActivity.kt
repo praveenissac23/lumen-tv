@@ -10,7 +10,11 @@ import android.speech.RecognizerIntent
 import android.view.KeyEvent
 import android.view.View
 import android.view.ViewGroup
+import android.os.Build
+import android.webkit.RenderProcessGoneDetail
 import android.webkit.WebChromeClient
+import android.webkit.WebResourceRequest
+import android.webkit.WebResourceResponse
 import android.webkit.WebSettings
 import android.webkit.WebView
 import android.webkit.WebViewClient
@@ -43,16 +47,36 @@ class MainActivity : Activity() {
         val videoLayer = FrameLayout(this)
         root.addView(videoLayer, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
 
-        web = WebView(this)
-        web.setBackgroundColor(Color.TRANSPARENT)
-        web.setLayerType(View.LAYER_TYPE_HARDWARE, null)
-        web.isFocusable = true
-        web.isFocusableInTouchMode = true
-        web.overScrollMode = View.OVER_SCROLL_NEVER
-        web.setInitialScale(100)
-        web.isVerticalScrollBarEnabled = false
-        web.isHorizontalScrollBarEnabled = false
-        with(web.settings) {
+        rootView = root
+        web = buildWebView()
+        root.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+        setContentView(root)
+
+        server = LocalServer { msg -> emit("remote", msg) }
+        server.start()
+        player = PlayerHost(this, videoLayer) { evt, data -> emit(evt, data) }
+        bridge = NativeBridge(this)
+        web.addJavascriptInterface(bridge, "Native")
+        web.loadUrl("file:///android_asset/web/index.html")
+        web.requestFocus()
+    }
+
+    private lateinit var rootView: FrameLayout
+    val thumbs by lazy { Thumbs(this) }
+    val epg by lazy { EpgStore(this) }
+
+    @SuppressLint("SetJavaScriptEnabled")
+    private fun buildWebView(): WebView {
+        val w = WebView(this)
+        w.setBackgroundColor(Color.TRANSPARENT)
+        w.isFocusable = true
+        w.isFocusableInTouchMode = true
+        w.overScrollMode = View.OVER_SCROLL_NEVER
+        w.setInitialScale(100)
+        w.isVerticalScrollBarEnabled = false
+        w.isHorizontalScrollBarEnabled = false
+        if (Build.VERSION.SDK_INT >= 26) w.setRendererPriorityPolicy(WebView.RENDERER_PRIORITY_IMPORTANT, true)
+        with(w.settings) {
             javaScriptEnabled = true
             domStorageEnabled = true
             allowFileAccess = true
@@ -70,24 +94,38 @@ class MainActivity : Activity() {
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
         }
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
-        web.webViewClient = object : WebViewClient() {
+        w.webViewClient = object : WebViewClient() {
             @Deprecated("Deprecated in Java")
             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean = true // never navigate away
+
+            // Logos and posters are downscaled natively (see Thumbs)
+            override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
+                val u = request?.url ?: return null
+                if (u.host == "thumb.lumen") {
+                    val src = u.getQueryParameter("u") ?: return null
+                    val width = u.getQueryParameter("w")?.toIntOrNull() ?: 320
+                    return thumbs.serve(src, width)
+                }
+                return null
+            }
+
+            // If Android kills the interface process (low memory), rebuild it instead of crashing the app.
+            override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
+                if (view !== web) return true
+                try { rootView.removeView(web); web.destroy() } catch (e: Exception) { }
+                web = buildWebView()
+                rootView.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
+                web.addJavascriptInterface(bridge, "Native")
+                web.loadUrl("file:///android_asset/web/index.html")
+                web.requestFocus()
+                return true
+            }
         }
-        web.webChromeClient = WebChromeClient()
-        root.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))
-        web.addOnLayoutChangeListener { v, l, t, r, b, ol, ot, orr, ob ->
+        w.webChromeClient = WebChromeClient()
+        w.addOnLayoutChangeListener { _, l, t, r, b, ol, ot, orr, ob ->
             if (r - l != orr - ol || b - t != ob - ot) emit("resize", JSONObject())
         }
-        setContentView(root)
-
-        server = LocalServer { msg -> emit("remote", msg) }
-        server.start()
-        player = PlayerHost(this, videoLayer) { evt, data -> emit(evt, data) }
-        bridge = NativeBridge(this)
-        web.addJavascriptInterface(bridge, "Native")
-        web.loadUrl("file:///android_asset/web/index.html")
-        web.requestFocus()
+        return w
     }
 
     /** Send an event to the web UI: window.__nat(evt, data). Safe from any thread. */

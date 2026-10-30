@@ -1,10 +1,10 @@
 // Master search: on-screen keyboard + voice, instant grouped results.
-import { C, nowNext, needsPin } from '../data.js';
+import { C, needsPin } from '../data.js';
 import { S, pushSearch, isFav } from '../store.js';
 import { esc, hhmm, now, dayLabel, debounce } from '../util.js';
 import { focus } from '../nav.js';
-import { icon, logo, poster, progressBar, stars } from '../ui.js';
-import { search, suggest } from '../search.js';
+import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots } from '../ui.js';
+import { search, suggestFrom, searchOnTv } from '../search.js';
 import { playLive, playCatchup } from '../player.js';
 import { itemActions } from '../actions.js';
 import { showKeyboard } from '../native.js';
@@ -80,32 +80,44 @@ export class SearchScreen {
     }
     const r = search(q);
     this.res = r;
-    const words = suggest(q, 4).filter((s) => s.toLowerCase() !== q.toLowerCase());
+    const words = suggestFrom(r, 4).filter((s) => s.toLowerCase() !== q.toLowerCase());
     sugg.innerHTML = words.map((w) => `<button class="f sugg" data-q="${esc(w)}">${icon('search')}<span>${esc(w)}</span></button>`).join('');
-    if (!r.total) {
-      track.innerHTML = `<div class="sr-empty"><h1>No results for “${esc(q)}”</h1><p>Check the spelling, try fewer words, or search by channel number.</p></div>`;
-      return;
-    }
     const t = now();
     const best = r.best;
-    let html = `<p class="sr-count">${this.params.voice && q === (this.params.q || '').trim() ? `You said “${esc(this.params.q)}”. ` : ''}${r.total} results in ${Math.max(1, Math.round(r.ms))} ms</p>`;
-    if (best) html += `<section class="sr-sec sr-best" data-group="best">${this.bestCard(best, t)}</section>`;
     const row = (title, items, render, key) => items.length ? `<section class="sr-sec"><h2>${title}<small>${items.length}</small></h2>
       <div class="row-clip" data-scroll="x" data-pad="72"><div class="row-track" data-group="r-${key}">${items.map(render).join('')}</div></div></section>` : '';
+    let html = `<p class="sr-count" id="sr-count">${this.params.voice && q === (this.params.q || '').trim() ? `You said “${esc(this.params.q)}”. ` : ''}${r.total ? `${r.total} results in ${Math.max(1, Math.round(r.ms))} ms` : 'Searching the guide…'}</p>`;
+    if (best) html += `<section class="sr-sec sr-best" data-group="best">${this.bestCard(best, t)}</section>`;
     html += row('Channels', r.live, (ch, i) => this.chTile(ch, i), 'live');
-    html += row('On TV', r.progs, (p, i) => this.progTile(p, i, t), 'progs');
+    html += `<div id="sr-ontv"></div>`;
     html += row('Films', r.movie, (m, i) => this.posterTile('movie', m, i), 'movie');
     html += row('Series', r.series, (m, i) => this.posterTile('series', m, i), 'series');
     track.innerHTML = html;
+    // programmes come from the guide database a moment later
+    const token = this.tvToken = (this.tvToken || 0) + 1;
+    searchOnTv(q).then((progs) => {
+      if (token !== this.tvToken || this.res !== r) return;
+      r.progs = progs;
+      r.total += progs.length;
+      const host = track.querySelector('#sr-ontv');
+      if (host) host.outerHTML = row('On TV', progs, (p, i) => this.progTile(p, i, now()), 'progs');
+      const c = track.querySelector('#sr-count');
+      if (!r.total) track.innerHTML = `<div class="sr-empty"><h1>No results for “${esc(q)}”</h1><p>Check the spelling, try fewer words, or search by channel number.</p></div>`;
+      else if (c) c.textContent = `${r.total} results`;
+      if (!best && progs.length && !r.live.length && !this.view.querySelector('.sr-best')) {
+        // a programme is the top result when nothing else matched
+        r.best = { kind: 'prog', item: progs[0] };
+        track.insertAdjacentHTML('afterbegin', `<section class="sr-sec sr-best" data-group="best">${this.bestCard(r.best, now())}</section>`);
+      }
+    }).catch(() => {});
   }
 
   bestCard(b, t) {
     const it = b.item;
     if (b.kind === 'live') {
-      const nn = nowNext(it);
       return `<button class="f res best" data-kind="live" data-i="${this.res.live.indexOf(it)}">${logo(it, 'lg')}
         <span class="best-main"><small>Top result: channel ${it.num}</small><b>${esc(it.name)}</b>
-        <span>${esc(nn && nn.now ? 'Now: ' + nn.now.t : '')}</span>${nn && nn.now ? progressBar(nn.now.pct) : ''}</span>
+        ${nowSlot(it, 'best')}</span>
         <span class="best-cta">${icon('play')}Watch</span></button>`;
     }
     if (b.kind === 'prog') {
@@ -121,10 +133,9 @@ export class SearchScreen {
   }
 
   chTile(ch, i) {
-    const nn = nowNext(ch);
     return `<button class="f tile ch-tile res" data-kind="live" data-i="${i}">
       <span class="ct-top">${logo(ch, 'sm')}<span class="ct-num">${ch.num}</span>${isFav('live', ch.id) ? icon('heartFill', 'favmark') : ''}</span>
-      <span class="ct-name">${esc(ch.name)}</span><span class="ct-now">${esc(nn && nn.now ? nn.now.t : '')}</span>${nn && nn.now ? progressBar(nn.now.pct, 'thin') : ''}</button>`;
+      <span class="ct-name">${esc(ch.name)}</span>${nowSlot(ch, 'tile')}</button>`;
   }
 
   progTile(p, i, t) {
@@ -139,6 +150,8 @@ export class SearchScreen {
   posterTile(kind, m, i) {
     return `<button class="f tile poster-tile res" data-kind="${kind}" data-id="${esc(m.id)}">${poster(m)}<span class="pt-cap"><b>${esc(m.name)}</b><small>${m.year || ''}</small></span></button>`;
   }
+
+  onEpg() { patchNowSlots(this.view); }
 
   async open(t) {
     const kind = t.dataset.kind;

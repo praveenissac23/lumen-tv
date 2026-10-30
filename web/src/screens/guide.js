@@ -1,5 +1,6 @@
 // TV guide: programme grid with time ruler, now line, preview and catch-up.
 import { C, progs, nowNext, itemsIn, visibleCats, needsPin } from '../data.js';
+import { prefetchRanges, hasProgs } from '../epg.js';
 import { S, isFav, toggleFav } from '../store.js';
 import { esc, hhmm, now, dayLabel, debounce, minutesLeft } from '../util.js';
 import { focus } from '../nav.js';
@@ -67,6 +68,8 @@ export class GuideScreen {
     if (this.ci < this.top) this.top = this.ci;
     if (this.ci > this.top + vis - 1) this.top = this.ci - vis + 1;
     const rows = this.channels.slice(this.top, this.top + vis);
+    prefetchRanges(rows.filter((ch) => !needsPin('live', ch.cat)));
+    prefetchRanges(this.channels.slice(this.top + vis, this.top + vis * 2)); // next page, ready before you scroll
     let html = '';
     rows.forEach((ch, k) => {
       const ci = this.top + k;
@@ -84,7 +87,7 @@ export class GuideScreen {
         cells += `<button class="f g-prog ${live ? 'live' : ''} ${past ? 'past' : ''} ${past && ch.arch ? 'cu' : ''}" data-ci="${ci}" data-s="${p[0]}" data-e="${p[1]}" style="left:${x}px;width:${w}px">
           <b>${esc(p[2])}</b>${w > 150 ? `<small>${hhmm(p[0])}–${hhmm(p[1])}</small>` : ''}${past && ch.arch && w > 60 ? icon('history', 'cu-ic') : ''}</button>`;
       }
-      if (!any) cells = `<button class="f g-prog empty" data-ci="${ci}" data-s="${ws}" data-e="${we}" style="left:0;width:${GRID_W - 4}px"><b>${locked ? 'Locked' : 'No guide information'}</b></button>`;
+      if (!any) cells = `<button class="f g-prog empty" data-ci="${ci}" data-s="${ws}" data-e="${we}" style="left:0;width:${GRID_W - 4}px"><b>${locked ? 'Locked' : hasProgs(ch) ? 'No guide information' : 'Loading guide…'}</b></button>`;
       html += `<div class="g-row ${ci === this.ci ? 'cur' : ''}">
         <div class="g-ch">${logo(ch, 'sm')}<span class="num">${ch.num}</span><b>${esc(ch.name)}</b></div>
         <div class="g-line">${cells}</div></div>`;
@@ -93,6 +96,18 @@ export class GuideScreen {
     grid.innerHTML = html + `<i class="now-line" id="now-line"></i>`;
     this.paintNowLine();
     this.focusCell();
+  }
+
+  onEpg() {
+    // Guide data arrived for rows on screen: redraw, keeping the current cell.
+    if (this.painting) return;
+    this.painting = true;
+    requestAnimationFrame(() => {
+      this.painting = false;
+      const a = document.activeElement, inGrid = this.view.querySelector('#gd-grid').contains(a);
+      this.paint();
+      if (!inGrid && a && document.contains(a)) focus(a, { noScroll: true });   // e.g. the detail panel or an open menu
+    });
   }
 
   paintNowLine() {

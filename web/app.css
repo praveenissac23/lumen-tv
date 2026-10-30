@@ -199,13 +199,13 @@ body.playing #app { visibility: hidden; }
 .empty p { color: var(--muted); }
 
 /* ---------- column screens (live, films) ---------- */
-.lv, .vd { position: absolute; inset: 0; display: grid; padding: 46px var(--right) 0 56px; gap: 40px; }
+.lv, .vd { position: absolute; inset: 0; display: grid; grid-template-rows: minmax(0, 1fr); padding: 46px var(--right) 0 56px; gap: 40px; }
 .lv { grid-template-columns: 340px 620px 1fr; }
 .vd { grid-template-columns: 340px 1fr; }
-.lv-col { position: relative; min-width: 0; display: flex; flex-direction: column; }
+.lv-col { position: relative; min-width: 0; min-height: 0; display: flex; flex-direction: column; }
 .col-h { font-size: 36px; font-weight: 700; letter-spacing: -.015em; height: 76px; display: flex; align-items: center; gap: 16px; }
 .col-h small { font-size: 24px; font-weight: 500; color: var(--muted); }
-.lv-cats, .vd-cats, .lv-chans { position: relative; flex: 1; margin: 0 -12px; padding: 0 12px; overflow: hidden; margin-bottom: 40px; }
+.lv-cats, .vd-cats, .lv-chans { position: relative; flex: 1; min-height: 0; margin: 0 -12px; padding: 0 12px; overflow: hidden; margin-bottom: 40px; }
 .vtrack { position: relative; transition: transform .18s var(--ease); }
 .vrow, .vcell { position: absolute; left: 0; right: 0; }
 .vrow > .f { width: 100%; }
@@ -248,9 +248,9 @@ body.playing #app { visibility: hidden; }
 .pv-locked .ic { font-size: 40px; }
 
 /* films and series */
-.vd-main { position: relative; display: flex; flex-direction: column; min-width: 0; }
+.vd-main { position: relative; display: flex; flex-direction: column; min-width: 0; min-height: 0; }
 .vd-head { display: flex; align-items: center; justify-content: space-between; height: 76px; }
-.vd-grid { position: relative; flex: 1; margin: 16px -28px 0; padding: 0 28px; overflow: hidden; }
+.vd-grid { position: relative; flex: 1; min-height: 0; margin: 16px -28px 0; padding: 0 28px; overflow: hidden; }
 .vcell { padding: 20px 14px 0; }
 .vcell .poster-tile { width: 100%; }
 .vcell .art-title { font-size: 26px; }
@@ -482,7 +482,7 @@ body.playing .player-ui { display: block; }
 .pstatus.err { background: rgba(10, 12, 15, .85); padding: 28px 40px; border-radius: 20px; }
 .zap-panel { position: absolute; left: 0; top: 0; bottom: 0; width: 720px; background: linear-gradient(90deg, rgba(10, 12, 15, .96) 70%, rgba(10, 12, 15, 0)); padding: 56px 120px 40px 72px; display: flex; flex-direction: column; }
 .zap-head { font-size: 32px; font-weight: 700; margin-bottom: 20px; padding-left: 16px; }
-.zap-list { position: relative; flex: 1; overflow: hidden; }
+.zap-list { position: relative; flex: 1; min-height: 0; overflow: hidden; }
 .zap-row { display: flex; align-items: center; gap: 18px; height: 84px; padding: 0 18px; border-radius: var(--r-row); width: 100%; }
 .zap-row .num { width: 50px; text-align: right; color: var(--muted); font-size: 22px; }
 .zr-main { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 3px; }
@@ -585,3 +585,12 @@ body.lite .toast { box-shadow: none; }
 .update-progress .bar { flex: none; height: 10px; }
 .update-progress .bar i { background: var(--brass); }
 .update-progress small { color: var(--text-2); font-size: 21px; }
+
+/* ---------- now/next slots ---------- */
+.nn-tile { display: flex; flex-direction: column; gap: 4px; flex: 1; min-width: 0; justify-content: flex-end; }
+.nn-tile .ct-now { margin-bottom: auto; }
+.nn-row { display: flex; flex-direction: column; gap: 4px; min-width: 0; }
+.nn-hero { display: block; }
+.nn-best { display: flex; flex-direction: column; gap: 8px; }
+.nn-best span { color: var(--text-2); font-size: 23px; }
+.nn-best .bar { flex: none; max-width: 420px; }

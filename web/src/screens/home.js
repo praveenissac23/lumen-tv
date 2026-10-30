@@ -6,7 +6,8 @@ import { itemActions } from '../actions.js';
 import { update, installUpdate } from '../updates.js';
 import { esc, hhmm, now, minutesLeft } from '../util.js';
 import { focus, reveal } from '../nav.js';
-import { icon, logo, poster, progressBar, stars } from '../ui.js';
+import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots } from '../ui.js';
+import { prefetchNow, hasProgs } from '../epg.js';
 import { preview, stopPreview, playLive, playVod, playCatchup } from '../player.js';
 import { movieUrl, episodeUrl } from '../data.js';
 
@@ -19,7 +20,7 @@ export class HomeScreen {
 
   heroChannel() {
     const id = S.recentLive[0] || S.favs.live[0];
-    return (id && C.byId.live.get(id)) || C.live.find((c) => nowNext(c)?.now) || C.live[0];
+    return (id && C.byId.live.get(id)) || C.live[0];
   }
 
   rows() {
@@ -62,13 +63,15 @@ export class HomeScreen {
     // live sport right now (or whatever category has the most live programmes)
     const sports = C.cats.live.find((c) => /sport/i.test(c.name));
     if (sports && !needsPin('live', sports.id)) {
-      const on = itemsIn('live', sports.id).filter((c) => nowNext(c)?.now).slice(0, 20);
-      if (on.length) rows.push({ key: 'sport', title: 'Live sport now', kind: 'live', items: on });
+      const on = itemsIn('live', sports.id).slice(0, 20);
+      if (on.length) rows.push({ key: 'sport', title: 'Sport channels', kind: 'live', items: on, more: { screen: 'live', cat: sports.id } });
     }
     // catch-up: programmes that finished in the last 6 h on archive channels you watch
     const cu = [];
     const t = now();
-    const pool = [...new Set([...favs, ...recent, ...C.live.filter((c) => c.arch).slice(0, 40)])].filter((c) => c.arch && !needsPin('live', c.cat));
+    // only channels you actually watch: each one is a guide lookup
+    const pool = [...new Set([...favs, ...recent])].filter((c) => c.arch && !needsPin('live', c.cat)).slice(0, 12);
+    this.cuPool = pool;
     for (const ch of pool) {
       for (const p of progs(ch)) if (p[1] < t && p[1] > t - 6 * 3600 && p[1] - p[0] >= 1800) cu.push({ ch, s: p[0], e: p[1], t: p[2], d: p[3] });
       if (cu.length > 60) break;
@@ -85,12 +88,10 @@ export class HomeScreen {
 
   tile(kind, it, i) {
     if (kind === 'live') {
-      const nn = nowNext(it);
       return `<button class="f tile ch-tile" data-k="live" data-id="${esc(it.id)}">
         <span class="ct-top">${logo(it, 'sm')}<span class="ct-num">${it.num}</span>${isFav('live', it.id) ? icon('heartFill', 'favmark') : ''}</span>
         <span class="ct-name">${esc(it.name)}</span>
-        <span class="ct-now">${esc(nn && nn.now ? nn.now.t : 'No guide information')}</span>
-        ${nn && nn.now ? progressBar(nn.now.pct, 'thin') : ''}</button>`;
+        ${nowSlot(it, 'tile')}</button>`;
     }
     if (kind === 'cont') {
       return `<button class="f tile land-tile" data-k="cont" data-i="${i}">
@@ -112,7 +113,6 @@ export class HomeScreen {
   render() {
     const ch = this.heroChannel();
     this.hero = ch;
-    const nn = ch && nowNext(ch);
     this.rowData = this.rows();
     const hour = new Date().getHours();
     const greet = hour < 5 ? 'Good night' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
@@ -131,13 +131,11 @@ export class HomeScreen {
           <div class="hero-info">
             <p class="hero-kicker">${S.recentLive[0] ? 'Pick up where you left off' : 'On now'}</p>
             <div class="hero-ch">${logo(ch, 'md')}<div><b>${esc(ch.name)}</b><small>Channel ${ch.num}</small></div></div>
-            <h1>${esc(nn && nn.now ? nn.now.t : ch.name)}</h1>
-            ${nn && nn.now ? `<div class="hero-time"><span>${hhmm(nn.now.s)}</span>${progressBar(nn.now.pct)}<span>${hhmm(nn.now.e)}</span><em>${minutesLeft(nn.now.e)}</em></div>` : ''}
-            ${nn && nn.next ? `<p class="hero-next">Next at ${hhmm(nn.next.s)}: ${esc(nn.next.t)}</p>` : ''}
+            ${nowSlot(ch, 'hero')}
             <div class="hero-actions">
               <button class="f btn primary" id="hero-watch">${icon('play')}Watch now</button>
               <button class="f btn" id="hero-guide">${icon('guide')}TV guide</button>
-              ${ch.arch && nn && nn.now ? `<button class="f btn" id="hero-over">${icon('history')}Start over</button>` : ''}
+              ${ch.arch ? `<button class="f btn" id="hero-over">${icon('history')}Start over</button>` : ''}
             </div>
           </div>
         </section>` : ''}
@@ -160,7 +158,8 @@ export class HomeScreen {
     document.addEventListener('update-available', this.onUpd);
     const w = v.querySelector('#hero-watch'); if (w) w.onclick = () => this.watch(this.hero);
     const g = v.querySelector('#hero-guide'); if (g) g.onclick = () => this.app.go('guide', { ch: this.hero.id });
-    const o = v.querySelector('#hero-over'); if (o) o.onclick = () => { const nn = nowNext(this.hero); playCatchup(this.hero, nn.now, C.live, () => this.app.reload()); };
+    const o = v.querySelector('#hero-over'); if (o) o.onclick = () => { const nn = nowNext(this.hero); if (nn && nn.now) playCatchup(this.hero, nn.now, C.live, () => this.app.reload()); else this.watch(this.hero); };
+    prefetchNow(this.rowData.flatMap((r) => (r.kind === 'live' ? r.items.slice(0, 12) : [])));
     v.addEventListener('click', (e) => {
       const t = e.target.closest('.tile');
       if (!t) return;
@@ -255,6 +254,15 @@ export class HomeScreen {
       return { sel: `[data-row="${row.dataset.row}"] .tile:nth-child(${i + 1})` };
     }
     return null;
+  }
+
+  // Guide answers arrived: refresh the now/next text in place; add the catch-up row once its data is in.
+  onEpg() {
+    patchNowSlots(this.view);
+    if (!this.view.querySelector('.row-cu') && this.cuPool && this.cuPool.length && this.cuPool.every(hasProgs) && !this.cuTried) {
+      this.cuTried = true;
+      if (this.rows().some((r) => r.kind === 'cu')) this.app.reload();
+    }
   }
 
   destroy() { clearTimeout(this.previewTimer); stopPreview(); document.removeEventListener('update-available', this.onUpd); }

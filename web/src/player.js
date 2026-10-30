@@ -4,7 +4,7 @@ import { C, nowNext, liveUrl, catchupUrl, progs } from './data.js';
 import { S, setting, pushRecentLive, saveProgress, progressOf, isFav, toggleFav } from './store.js';
 import { $, esc, hhmm, duration, minutesLeft, now, el } from './util.js';
 import { pushLayer, popLayer, focus } from './nav.js';
-import { icon, logo, progressBar, toast, sheet, VList } from './ui.js';
+import { icon, logo, progressBar, toast, sheet, VList, nowSlot, patchNowSlots } from './ui.js';
 import { autoSubs, searchSubs, loadOnline, hasKey, langName, SUB_LANGS } from './subs.js';
 import { itemActions, download } from './actions.js';
 import { bgHole } from './look.js';
@@ -155,6 +155,12 @@ export function exit() {
 }
 
 // ---------- OSD ----------
+// Guide data arrived while playing: refresh what is on screen.
+export function onEpg() {
+  if (!P.mode) return;
+  if (listUI) patchNowSlots(listUI.panel);
+  if (osdVisible() && P.mode !== 'vod') paint();
+}
 function osdVisible() { return root().classList.contains('osd'); }
 function showOsd(ms = 5000) {
   root().classList.add('osd');
@@ -227,11 +233,8 @@ function openList() {
   root().appendChild(panel);
   const vl = new VList(panel.querySelector('.zap-list'), {
     rowH: 92,
-    render: (ch) => {
-      const nn = nowNext(ch);
-      return `<button class="f zap-row ${ch === P.ch ? 'cur' : ''}"><span class="num">${ch.num}</span>${logo(ch, 'sm')}
-        <span class="zr-main"><b>${esc(ch.name)}</b><small>${esc(nn && nn.now ? nn.now.t : '')}</small>${nn && nn.now ? progressBar(nn.now.pct, 'thin') : ''}</span></button>`;
-    },
+    render: (ch) => `<button class="f zap-row ${ch === P.ch ? 'cur' : ''}"><span class="num">${ch.num}</span>${logo(ch, 'sm')}
+        <span class="zr-main"><b>${esc(ch.name)}</b>${nowSlot(ch, 'row')}</span></button>`,
     onSelect: (ch) => { closeList(); startLive(ch, false); },
   });
   vl.setItems(P.list, Math.max(0, P.list.indexOf(P.ch)));

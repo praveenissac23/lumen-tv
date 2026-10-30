@@ -22,13 +22,14 @@ window.__nat = (evt, data) => {
     if (data.ok) p.resolve(evt === 'call' ? N.take(data.id) : data); else p.reject(new Error(data.error || 'Request failed'));
     return;
   }
-  if (evt === 'http' || evt === 'xmltv') {
+  if (evt === 'http' || evt === 'catalog' || (evt === 'epg' && data.id != null)) {
     const p = pending.get(data.id);
-    if (!p) return;
-    pending.delete(data.id);
-    if (data.ok) p.resolve(evt === 'http' ? N.take(data.id) : true);
-    else p.reject(new Error(data.error || `HTTP ${data.status}`));
-    return;
+    if (p) {
+      pending.delete(data.id);
+      if (data.ok) p.resolve(evt === 'http' ? N.take(data.id) : (data.count != null ? data.count : true));
+      else p.reject(new Error(data.error || `HTTP ${data.status}`));
+    }
+    if (evt !== 'epg') return;
   }
   emit(evt, data);
 };
@@ -57,17 +58,24 @@ export function http(url, { timeout = 20000 } = {}) {
   });
 }
 
-// Download and parse XMLTV natively into the cache under `key`.
-export function xmltv(url, key, fromSec, toSec) {
-  if (N) {
-    const id = ++seq;
-    return new Promise((resolve, reject) => {
-      pending.set(id, { resolve, reject });
-      N.xmltv(id, url, key, fromSec, toSec);
-    });
-  }
-  return http(url).then((xml) => { cacheWrite(key, JSON.stringify(parseXmltv(xml, fromSec, toSec))); return true; });
+// Stream a big Xtream list natively into cache file `key`; resolves with the item count.
+export function catalog(url, kind, key) {
+  if (!N) return null; // browser: caller falls back to http + JSON
+  const id = ++seq;
+  return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); N.catalog(id, url, kind, key); });
 }
+
+// Programme guide (native SQLite). Each resolves with a JSON string.
+function callNative(fn) {
+  const id = ++seq;
+  return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); fn(id); });
+}
+export const epgImport = (url, from, to, idsCsv) => callNative((id) => N.epgImport(id, url, from, to, idsCsv));
+export const epgNow = (idsCsv, at) => callNative((id) => N.epgNow(id, idsCsv, at));
+export const epgRange = (idsCsv, from, to) => callNative((id) => N.epgRange(id, idsCsv, from, to));
+export const epgSearch = (q, from, to, limit) => callNative((id) => N.epgSearch(id, q, from, to, limit));
+export const epgInfoRaw = () => N.epgInfo();
+export const parseXmltvText = (xml, from, to) => parseXmltv(xml, from, to);
 
 // Disk cache for catalogue and EPG (instant start-up).
 export function cacheRead(key) {

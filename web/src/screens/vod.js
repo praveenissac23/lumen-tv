@@ -72,7 +72,8 @@ export class VodScreen {
     let items = itemsIn(this.kind, this.cat);
     if (this.cat === '__all') items = items.filter((x) => !needsPin(this.kind, x.cat));
     const s = this.sort;
-    items = [...items].sort(s === 'name' ? (a, b) => a.name.localeCompare(b.name)
+    // plain comparisons on pre-normalised names: localeCompare over 50,000 titles takes seconds on a TV stick
+    items = [...items].sort(s === 'name' ? (a, b) => (a.n < b.n ? -1 : a.n > b.n ? 1 : 0)
       : s === 'rating' ? (a, b) => (b.rating || 0) - (a.rating || 0)
       : s === 'year' ? (a, b) => (b.year || 0) - (a.year || 0) || b.added - a.added
       : (a, b) => b.added - a.added);
