@@ -1,0 +1,17 @@
+{
+  "name": "lumen-tv",
+  "version": "1.0.0",
+  "description": "Lumen TV: fast IPTV player for Android TV and Fire TV",
+  "scripts": {
+    "build": "./tools/build-web.sh",
+    "shots": "python3 -I tools/shoot.py build/shots"
+  },
+  "author": "",
+  "license": "UNLICENSED",
+  "devDependencies": {
+    "@fontsource/schibsted-grotesk": "^5.3.0",
+    "esbuild": "^0.28.2",
+    "qrcode-generator": "^2.0.4"
+  },
+  "private": true
+}

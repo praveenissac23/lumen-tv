@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<resources>
+    <!-- Plain framework theme: no AppCompat, keeps the APK small and start-up fast.
+         The window background matches the app so there is no white flash. -->
+    <style name="Theme.Lumen" parent="android:Theme.DeviceDefault.NoActionBar">
+        <item name="android:windowBackground">@color/bg</item>
+        <item name="android:windowFullscreen">true</item>
+        <item name="android:windowNoTitle">true</item>
+        <item name="android:windowContentOverlay">@null</item>
+        <item name="android:windowAnimationStyle">@null</item>
+        <item name="android:colorAccent">@color/brass</item>
+    </style>
+    <color name="bg">#FF12161B</color>
+    <color name="brass">#FFCFA968</color>
+</resources>

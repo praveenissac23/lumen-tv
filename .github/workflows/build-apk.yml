@@ -1,26 +1,51 @@
+# Every change pushed to main builds the app and publishes it as the latest release.
+# The app on the TV checks the latest release and offers "Update available".
 name: Build APK
 on:
   push:
+    branches: [main]
+    paths-ignore: ['README.md', 'design/**', 'tools/shoot.py', 'tools/bridge_test.py']
   workflow_dispatch:
+
+permissions:
+  contents: write
+
+concurrency:
+  group: build
+  cancel-in-progress: false
 
 jobs:
   apk:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
-      - name: Unzip project
-        run: unzip -q lumen-tv.zip
       - uses: actions/setup-node@v4
-        with: { node-version: 20 }
+        with: { node-version: 20, cache: npm }
       - uses: actions/setup-java@v4
-        with: { distribution: temurin, java-version: 17 }
+        with: { distribution: temurin, java-version: 17, cache: gradle }
+
       - name: Build the TV interface
-        working-directory: lumen-tv
         run: npm ci && bash tools/build-web.sh
+
+      - name: Restore the signing key (private repository secret)
+        env:
+          KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+        run: |
+          if [ -n "$KEYSTORE_B64" ]; then echo "$KEYSTORE_B64" | base64 -d > android/app/lumen.jks; echo "Signing with the Lumen key"; else echo "::warning::KEYSTORE_B64 secret not set: using a temporary key, so this build won't install as an update"; fi
+
       - name: Build the APK
-        working-directory: lumen-tv/android
+        working-directory: android
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: chmod +x gradlew && ./gradlew --no-daemon assembleRelease
-      - uses: actions/upload-artifact@v4
-        with:
-          name: lumen-tv-apk
-          path: lumen-tv/android/app/build/outputs/apk/release/*.apk
+
+      - name: Publish the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          NOTES: ${{ github.event.head_commit.message }}
+        run: |
+          cp android/app/build/outputs/apk/release/app-release.apk app-release.apk
+          gh release create "build-${{ github.run_number }}" app-release.apk \
+            --title "Lumen TV build ${{ github.run_number }}" \
+            --notes "${NOTES:-Manual build}" --latest

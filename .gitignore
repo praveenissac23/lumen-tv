@@ -1,0 +1,12 @@
+node_modules/
+build/
+android/.gradle/
+android/app/build/
+android/local.properties
+android/app/src/main/assets/
+*.iml
+.idea/
+
+# signing key comes from the repository secret
+android/app/lumen.jks
+*.jks
