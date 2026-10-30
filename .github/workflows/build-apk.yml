@@ -14,7 +14,6 @@ jobs:
         with: { node-version: 20 }
       - uses: actions/setup-java@v4
         with: { distribution: temurin, java-version: 17 }
-      - uses: android-actions/setup-android@v3
       - name: Build the TV interface
         working-directory: lumen-tv
         run: npm ci && bash tools/build-web.sh
