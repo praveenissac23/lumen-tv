@@ -63,6 +63,19 @@
         android:largeHeap="true"
         android:supportsRtl="true">
 
+        <receiver android:name=".InstallReceiver" android:exported="false" />
+        <receiver android:name=".RelaunchReceiver" android:exported="false">
+            <intent-filter>
+                <action android:name="android.intent.action.MY_PACKAGE_REPLACED" />
+            </intent-filter>
+        </receiver>
+        <activity
+            android:name=".SearchActivity"
+            android:exported="false"
+            android:theme="@style/Theme.Lumen"
+            android:screenOrientation="landscape"
+            android:configChanges="keyboard|keyboardHidden|navigation|orientation|screenLayout|screenSize|smallestScreenSize|uiMode|density"
+            android:windowSoftInputMode="stateAlwaysVisible|adjustPan" />
         <activity
             android:name=".MainActivity"
             android:exported="true"

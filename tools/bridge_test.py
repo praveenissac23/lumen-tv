@@ -124,6 +124,16 @@ with sync_playwright() as p:
     page.keyboard.press('F1'); page.wait_for_timeout(800)
     print('Fire TV Menu key -> native box used:', any(c['name'] == 'textInput' for c in page.evaluate('window.__calls')[-20:]), '| screen:', page.evaluate("document.body.dataset.screen"), '| playing:', page.evaluate("document.body.classList.contains('playing')"))
     if page.evaluate("document.body.classList.contains('playing')"): page.keyboard.press('Escape'); page.wait_for_timeout(300)
+    page.evaluate("__app.go('home', {}, {root:true})"); page.wait_for_timeout(300)
+    n0 = len([c for c in page.evaluate('window.__calls') if c['name'] == 'openWith'])
+    page.evaluate("(() => { const st = JSON.parse(Native.cacheRead('state') || '{}'); })()")
+    page.evaluate("__app.go('settings', {restore: {sec: 'downloads'}}, {root:true})"); page.wait_for_timeout(300)
+    page.evaluate("document.querySelector('[data-act=defplayer][data-arg=playerMovie]').click()"); page.wait_for_timeout(300)
+    page.evaluate("[...document.querySelectorAll('.sheet-item')].find(b => b.textContent.includes('VLC')).click()"); page.wait_for_timeout(300)
+    page.evaluate("__app.go('detail', {kind:'movie', id: __C.movie[1].id})"); page.wait_for_timeout(400)
+    page.evaluate("document.querySelector('[data-a=play]').click()"); page.wait_for_timeout(400)
+    oc = [c for c in page.evaluate('window.__calls') if c['name'] == 'openWith'][n0:]
+    print('default player VLC for films ->', [c['args'][0] for c in oc], '| in-app player opened:', page.evaluate("document.body.classList.contains('playing')"))
     print('page transparent on TV:', page.evaluate("getComputedStyle(document.body).backgroundColor"), page.evaluate("getComputedStyle(document.documentElement).backgroundColor"))
     # long-press menu -> external player, download path with HEAD, subtitles search
     page.evaluate("__app.go('home', {}, {root:true})"); page.wait_for_timeout(400)

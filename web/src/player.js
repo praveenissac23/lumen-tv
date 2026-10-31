@@ -87,8 +87,23 @@ export function preview(ch, rect) {
 }
 export function stopPreview() { if (P.previewCh && !P.mode) N.stop(); P.previewCh = null; if (!P.mode) hole(null); }
 
+// ---------- default player per section (Settings > Downloads and players) ----------
+// Returns true when the video was handed to VLC / MX Player instead of the built-in player.
+function viaDefaultPlayer(section, url, title, position = 0) {
+  if (!N.isNative) return false;
+  const pkg = setting({ live: 'playerLive', movie: 'playerMovie', series: 'playerSeries' }[section]);
+  if (!pkg || pkg === 'lumen') return false;
+  const app = N.installedApps().find((a) => a.pkg === pkg && a.role === 'player');
+  if (!app) return false;
+  if (P.previewCh) stopPreview();
+  const ok = N.openWith(pkg, url, { title, mode: 'play', position: Math.round(position || 0) });
+  if (ok === false) { toast(`${app.name} couldn’t open this. Playing here instead.`, 'err'); return false; }
+  return true;
+}
+
 // ---------- entry points ----------
 export function playLive(ch, list, onExit) {
+  if (!P.mode && viaDefaultPlayer('live', urlOr(liveUrl(ch)), ch.name)) { pushRecentLive(ch.id); return; }
   P.list = list && list.length ? list : C.live;
   P.onExit = onExit || P.onExit;
   enter('live');
@@ -106,6 +121,7 @@ function startLive(ch, fresh) {
 }
 
 export function playCatchup(ch, prog, list, onExit) {
+  if (!P.mode && viaDefaultPlayer('live', urlOr(catchupUrl(ch, prog.s, prog.e)), `${ch.name}: ${prog.t}`)) return;
   if (!P.mode) { P.list = list || C.live; P.onExit = onExit || P.onExit; enter('catchup'); }
   P.mode = 'catchup'; P.ch = ch; P.prog = prog;
   N.play(urlOr(catchupUrl(ch, prog.s, prog.e)), { live: false });
@@ -115,6 +131,10 @@ export function playCatchup(ch, prog, list, onExit) {
 
 // item: {title, url, poster, kind, id, sub}
 export function playVod(item, resumeKey, onExit, queue) {
+  const section = item.kind === 'episode' || (resumeKey && resumeKey.startsWith('ep:')) ? 'series' : 'movie';
+  const saved = resumeKey && progressOf(resumeKey);
+  const title = item.sub && section === 'series' ? `${item.title} – ${item.sub}` : item.title;
+  if (!P.mode && viaDefaultPlayer(section, urlOr(item.url), title, saved ? saved.pos : 0)) return;
   P.onExit = onExit || P.onExit;
   enter('vod');
   P.mode = 'vod'; P.item = item; P.resumeKey = resumeKey; P.ch = null;

@@ -14,6 +14,7 @@ const DEFAULTS = {
   recentSearches: [],
   myLangs: ['malayalam', 'tamil', 'hindi'],   // languages shown as home sections
   pins: [],                // [{kind, cat}] categories pinned to the home screen
+  langRows: { malayalam: ['live', 'films'], tamil: ['films'], hindi: ['films'] },   // home rows per language
   watched: {},             // "movie:ID" / "ep:ID" -> true once finished
   settings: {
     autoplayLast: true,
@@ -33,6 +34,9 @@ const DEFAULTS = {
     osKey: '',             // OpenSubtitles API key
     downloader: '',        // remembered download app package ('' = ask)
     extPlayer: '',         // remembered external player package
+    playerLive: 'lumen',   // default player per section: 'lumen' (built in) or an app package
+    playerMovie: 'lumen',
+    playerSeries: 'lumen',
     nextEpisode: true,     // auto-play the next episode
     homeLangRows: 'films,live', // which rows each language gets
     uiSize: 'm',           // s | m | l  screen size adjustment
@@ -134,9 +138,12 @@ export function togglePin(kind, cat) {
   save();
   return !on;
 }
+export function langRowsFor(id) { return (state.langRows && state.langRows[id]) || ['films']; }
+export function setLangRows(id, rows) { state.langRows = { ...(state.langRows || {}), [id]: rows }; save(); }
 export function toggleLang(id) {
   const on = state.myLangs.includes(id);
   state.myLangs = on ? state.myLangs.filter((x) => x !== id) : [...state.myLangs, id];
+  if (!on && !(state.langRows && state.langRows[id])) state.langRows = { ...(state.langRows || {}), [id]: ['films'] };
   save();
   return !on;
 }

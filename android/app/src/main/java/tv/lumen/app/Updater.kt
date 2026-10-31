@@ -1,6 +1,10 @@
 package tv.lumen.app
 
+import android.app.PendingIntent
+import android.content.BroadcastReceiver
+import android.content.Context
 import android.content.Intent
+import android.content.pm.PackageInstaller
 import android.net.Uri
 import android.os.Build
 import android.provider.Settings
@@ -80,35 +84,53 @@ class Updater(private val act: MainActivity) {
     }
 
     private fun openInstaller(apk: File, emit: (String, JSONObject) -> Unit) {
+        report = emit
         // Android 8+: the app needs "Install unknown apps" permission once.
         if (Build.VERSION.SDK_INT >= 26 && !act.packageManager.canRequestPackageInstalls()) {
-            emit("update", JSONObject().put("state", "permission"))
-            try {
-                act.startActivity(
-                    Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${act.packageName}"))
-                        .addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
-                )
-            } catch (e: Exception) {
-                act.startActivity(Intent(Settings.ACTION_SECURITY_SETTINGS).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
-            }
             pendingApk = apk
+            emit("update", JSONObject().put("state", "permission"))
+            val opened = tryStart(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${act.packageName}")))
+                || tryStart(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES))
+                || tryStart(Intent(Settings.ACTION_SECURITY_SETTINGS))
+            if (!opened) emit("update", JSONObject().put("state", "permission-manual"))
             return
         }
-        val uri = if (Build.VERSION.SDK_INT >= 24)
-            FileProvider.getUriForFile(act, "${act.packageName}.files", apk)
-        else Uri.fromFile(apk)
-        @Suppress("DEPRECATION")
-        val intent = Intent(Intent.ACTION_INSTALL_PACKAGE)
-            .setData(uri)
-            .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK)
-            .putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true)
         try {
-            act.startActivity(intent)
+            installWithSession(apk)
         } catch (e: Exception) {
-            act.startActivity(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive")
-                .addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION or Intent.FLAG_ACTIVITY_NEW_TASK))
+            // Older installers: hand the file to the system's package installer screen.
+            val uri = if (Build.VERSION.SDK_INT >= 24) FileProvider.getUriForFile(act, "${act.packageName}.files", apk) else Uri.fromFile(apk)
+            @Suppress("DEPRECATION")
+            val ok = tryStart(Intent(Intent.ACTION_INSTALL_PACKAGE).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                .putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true))
+                || tryStart(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+            if (!ok) emit("update", JSONObject().put("state", "error").put("msg", e.message ?: "The installer couldn’t be opened"))
         }
     }
+
+    /** Streams the APK into a PackageInstaller session; Android shows one "Install" confirmation. */
+    private fun installWithSession(apk: File) {
+        val installer = act.packageManager.packageInstaller
+        val params = PackageInstaller.SessionParams(PackageInstaller.SessionParams.MODE_FULL_INSTALL)
+        params.setAppPackageName(act.packageName)
+        if (Build.VERSION.SDK_INT >= 31) params.setRequireUserAction(PackageInstaller.SessionParams.USER_ACTION_NOT_REQUIRED)
+        val id = installer.createSession(params)
+        installer.openSession(id).use { session ->
+            apk.inputStream().use { input ->
+                session.openWrite("lumen-tv", 0, apk.length()).use { out ->
+                    input.copyTo(out, 64 * 1024)
+                    session.fsync(out)
+                }
+            }
+            val flags = PendingIntent.FLAG_UPDATE_CURRENT or (if (Build.VERSION.SDK_INT >= 31) PendingIntent.FLAG_MUTABLE else 0)
+            val pending = PendingIntent.getBroadcast(act, id, Intent(act, InstallReceiver::class.java).setPackage(act.packageName), flags)
+            session.commit(pending.intentSender)
+        }
+    }
+
+    private fun tryStart(i: Intent): Boolean = try {
+        act.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
+    } catch (e: Exception) { false }
 
     // After the person allows "Install unknown apps", returning to the app continues the install.
     private var pendingApk: File? = null
@@ -116,6 +138,45 @@ class Updater(private val act: MainActivity) {
         val apk = pendingApk ?: return
         if (Build.VERSION.SDK_INT >= 26 && !act.packageManager.canRequestPackageInstalls()) return
         pendingApk = null
+        emit("update", JSONObject().put("state", "installing"))
         openInstaller(apk, emit)
+    }
+
+    companion object {
+        /** Where install results go (set while an update is running). */
+        @Volatile var report: ((String, JSONObject) -> Unit)? = null
+    }
+}
+
+/** Install results from PackageInstaller: shows Android's confirmation, or reports why it failed. */
+class InstallReceiver : BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) {
+        when (intent.getIntExtra(PackageInstaller.EXTRA_STATUS, -999)) {
+            PackageInstaller.STATUS_PENDING_USER_ACTION -> {
+                @Suppress("DEPRECATION")
+                val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
+                try { ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) {
+                    Updater.report?.invoke("update", JSONObject().put("state", "error").put("msg", "Android’s installer couldn’t be opened"))
+                }
+            }
+            PackageInstaller.STATUS_SUCCESS -> { /* the app restarts on the new version (see RelaunchReceiver) */ }
+            PackageInstaller.STATUS_FAILURE_ABORTED -> Updater.report?.invoke("update", JSONObject().put("state", "error").put("msg", "Update cancelled"))
+            PackageInstaller.STATUS_FAILURE_CONFLICT, PackageInstaller.STATUS_FAILURE_INCOMPATIBLE ->
+                Updater.report?.invoke("update", JSONObject().put("state", "error")
+                    .put("msg", "This build can’t replace the installed app. Uninstall Lumen TV once and install the latest build; updates work after that."))
+            PackageInstaller.STATUS_FAILURE_STORAGE -> Updater.report?.invoke("update", JSONObject().put("state", "error").put("msg", "Not enough free space on the TV"))
+            else -> Updater.report?.invoke("update", JSONObject().put("state", "error")
+                .put("msg", intent.getStringExtra(PackageInstaller.EXTRA_STATUS_MESSAGE) ?: "The update didn’t install"))
+        }
+    }
+}
+
+/** After an update installs, open the app again on the new version. */
+class RelaunchReceiver : BroadcastReceiver() {
+    override fun onReceive(ctx: Context, intent: Intent) {
+        if (intent.action != Intent.ACTION_MY_PACKAGE_REPLACED) return
+        try {
+            ctx.startActivity(Intent(ctx, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+        } catch (e: Exception) { }
     }
 }

@@ -47,7 +47,9 @@ export async function checkForUpdate({ quiet = true } = {}) {
 export function startUpdateChecks() {
   if (!N.isNative || setting('autoUpdateCheck') === false) return;
   setTimeout(() => checkForUpdate(), 4000);
-  setInterval(() => checkForUpdate(), 6 * 3600 * 1000);
+  setInterval(() => checkForUpdate(), 60 * 60 * 1000);
+  // also whenever the app comes back to the screen, at most every 10 minutes
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - update.checkedAt > 10 * 60 * 1000) checkForUpdate(); });
 }
 
 // Full-screen confirmation with download progress.
@@ -81,7 +83,8 @@ N.on('update', (d) => {
   const pct = document.getElementById('upd-pct');
   const bar = document.querySelector('.update-progress .bar i');
   if (d.state === 'downloading') { if (bar) bar.style.width = d.pct + '%'; if (pct) pct.textContent = `Downloading ${d.pct}%`; }
-  if (d.state === 'installing' && pct) pct.textContent = isMac() ? 'Installing. Lumen TV will restart in a moment.' : 'Opening the installer. Choose Install (or Update).';
-  if (d.state === 'permission' && pct) pct.textContent = 'One time only: switch on “Allow from this source” for Lumen TV, then press Back.';
+  if (d.state === 'installing' && pct) pct.textContent = isMac() ? 'Installing. Lumen TV will restart in a moment.' : 'Choose Install (or Update) on the next screen. Lumen TV reopens by itself when it’s done.';
+  if (d.state === 'permission' && pct) pct.textContent = 'One time only: switch Lumen TV on (Allow / Install unknown apps), then press Back. The update continues by itself.';
+  if (d.state === 'permission-manual' && pct) pct.textContent = 'One time only: on the TV open Settings > My Fire TV > Developer options > Install unknown apps, switch Lumen TV on, then come back and press Install update again.';
   if (d.state === 'error') { if (pct) pct.textContent = `Update failed: ${d.msg}`; toast(`Update failed: ${d.msg}`, 'err'); }
 });

@@ -303,6 +303,8 @@ class NativeBridge(private val act: MainActivity) {
                 if (pkg.startsWith("org.videolan")) putExtra("position", pos) else putExtra("position", pos.toInt())
                 putExtra("from_start", pos == 0L)
                 putExtra("secure_uri", true)
+                if (pkg.startsWith("com.mxtech")) putExtra("video_zoom", 1)      // MX Player: fit inside the screen
+                if (pkg.startsWith("org.videolan")) putExtra("from_start", pos == 0L)
             }
         }
         // Download managers register for plain links; players for video types. Try both, then share as text.
@@ -416,10 +418,16 @@ class NativeBridge(private val act: MainActivity) {
     /** Native search box: the TV keyboard opens, and holding the remote's mic button dictates into it. */
     @JavascriptInterface
     fun textInput(title: String, hint: String, initial: String) = ui {
-        act.textEntry.show(title, hint, initial) { text ->
-            emit("textinput", JSONObject().put("text", text ?: JSONObject.NULL))
+        try {
+            act.startActivityForResult(Intent(act, SearchActivity::class.java)
+                .putExtra(SearchActivity.EXTRA_TITLE, title).putExtra(SearchActivity.EXTRA_HINT, hint)
+                .putExtra(SearchActivity.EXTRA_INITIAL, initial), MainActivity.REQ_TEXT)
+        } catch (e: Exception) {
+            emit("textinput", JSONObject().put("text", JSONObject.NULL))
         }
     }
+
+    fun onTextResult(text: String?) { emit("textinput", JSONObject().put("text", text ?: JSONObject.NULL)) }
 
     /** Opens the TV's on-screen keyboard (on Fire TV, holding the Alexa button there dictates text). */
     @JavascriptInterface

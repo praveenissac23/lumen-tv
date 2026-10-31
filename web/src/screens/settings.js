@@ -1,7 +1,7 @@
 // Settings: playlists, parental control, categories, playback, voice and remote, guide.
 import { C, testXtream, refresh, refreshEpg, loadFromCache, clearEpgCache } from '../data.js';
 import { epgInfo } from '../epg.js';
-import { S, set, setting, upsertPlaylist, removePlaylist, setLocked, isLocked, setHidden, isHidden, activePlaylist, flush, toggleLang, moveLang, togglePin } from '../store.js';
+import { S, set, setting, upsertPlaylist, removePlaylist, setLocked, isLocked, setHidden, isHidden, activePlaylist, flush, toggleLang, moveLang, togglePin, langRowsFor, setLangRows } from '../store.js';
 import { LANGS, langById, langItems } from '../languages.js';
 import { SUB_LANGS, langName } from '../subs.js';
 import { WALLPAPERS, ACCENTS, applyLook } from '../look.js';
@@ -24,9 +24,9 @@ export class SettingsScreen {
     this.app = app; this.view = view;
     this.sec = params.restore?.sec || 'playlists';
     view.innerHTML = `<div class="st">
-      <nav class="st-nav" data-group="stnav"><h2 class="col-h">Settings</h2>
+      <nav class="st-nav" data-group="stnav" data-zone="stnav"><h2 class="col-h">Settings</h2>
         ${SECTIONS.map(([k, l, ic]) => `<button class="f st-sec ${k === this.sec ? 'on' : ''}" data-sec="${k}">${icon(ic)}<span>${l}</span></button>`).join('')}</nav>
-      <section class="st-panel" data-scroll="y" data-pad="40"><div class="st-track" id="st-body" data-group="stbody"></div></section></div>`;
+      <section class="st-panel" data-scroll="y" data-pad="40" data-zone="stbody"><div class="st-track" id="st-body" data-group="stbody"></div></section></div>`;
     view.querySelector('.st-nav').addEventListener('click', (e) => { const b = e.target.closest('[data-sec]'); if (b) { this.show(b.dataset.sec); focusFirst(view.querySelector('#st-body')); } });
     view.querySelector('.st-nav').addEventListener('focused', (e) => { const b = e.target.closest('[data-sec]'); if (b && b.dataset.sec !== this.sec) this.show(b.dataset.sec); });
     view.querySelector('#st-body').addEventListener('click', (e) => { const b = e.target.closest('[data-act]'); if (b) this.act(b.dataset.act, b.dataset.arg, b); });
@@ -95,22 +95,19 @@ export class SettingsScreen {
   }
 
   langs() {
-    const rows = (setting('homeLangRows') || 'films,live').split(',');
-    const present = LANGS.map((l) => ({ ...l, films: langItems('movie', l.id).length, live: langItems('live', l.id).length }));
+    const present = LANGS.map((l) => ({ ...l, films: langItems('movie', l.id).length, live: langItems('live', l.id).length, series: langItems('series', l.id).length }));
     const mine = S.myLangs.map((id) => present.find((l) => l.id === id)).filter(Boolean);
-    const others = present.filter((l) => !S.myLangs.includes(l.id));
-    const count = (l) => [l.films && `${l.films} films`, l.live && `${l.live} channels`].filter(Boolean).join(', ') || 'Nothing found in your playlist';
+    const others = present.filter((l) => !S.myLangs.includes(l.id)).sort((a, b) => (b.films + b.live + b.series) - (a.films + a.live + a.series));
+    const count = (l) => [l.live && `${l.live} channels`, l.films && `${l.films} films`, l.series && `${l.series} series`].filter(Boolean).join(', ') || 'Nothing found in your playlist';
+    const NAMES = { live: 'Channels', films: 'Films', series: 'Series' };
+    const shows = (id) => { const r = langRowsFor(id); return ['live', 'films', 'series'].filter((k) => r.includes(k)).map((k) => NAMES[k]).join(' + ') || 'Nothing on home'; };
     return `<h1>Home and languages</h1>
-      <p class="st-intro">Each language you pick gets its own rows on the home screen, with the newest 50 films first. Hold OK on any category in Live TV or Films to pin it to the home screen too.</p>
+      <p class="st-intro">Each language you add gets its own rows on the home screen, newest first, as long as you keep scrolling. Press OK on a language to choose its rows or change the order. Hold OK on any category in Live TV or Films to pin it to the home screen too.</p>
       <h2>Your languages, in home screen order</h2>
-      ${mine.map((l, i) => this.row(l.name, `<span class="order">${i + 1}</span>${this.toggle(true)}`, 'lang', l.id, count(l) + (i > 0 ? '. Hold OK to move up' : ''))).join('') || '<p class="st-intro">None yet. Switch one on below.</p>'}
-      <h2>Rows for each language</h2>
-      ${this.row('New films (latest 50)', this.toggle(rows.includes('films')), 'langrow', 'films')}
-      ${this.row('Live channels', this.toggle(rows.includes('live')), 'langrow', 'live')}
-      ${this.row('Series', this.toggle(rows.includes('series')), 'langrow', 'series')}
+      ${mine.map((l, i) => this.row(`${i + 1}. ${l.name}`, `<span class="pill">${esc(shows(l.id))}</span>`, 'langedit', l.id, count(l))).join('') || '<p class="st-intro">None yet. Add one below.</p>'}
       ${S.pins.length ? `<h2>Pinned to home</h2>${S.pins.map((p) => { const c = C.cats[p.kind].find((x) => x.id === p.cat); return c ? this.row(c.name, `<span class="pill">Remove</span>`, 'unpin', p.kind + ':' + p.cat, { live: 'Live TV', movie: 'Films', series: 'Series' }[p.kind]) : ''; }).join('')}` : ''}
-      <h2>More languages</h2>
-      ${others.map((l) => this.row(l.name, this.toggle(false), 'lang', l.id, count(l))).join('')}`;
+      <h2>Add a language</h2>
+      ${others.map((l) => this.row(l.name, icon('plus'), 'langadd', l.id, count(l))).join('')}`;
   }
 
   look() {
@@ -134,7 +131,10 @@ export class SettingsScreen {
     return `<h1>Downloads and players</h1>
       <p class="st-intro">Films and episodes have a Download button, and every channel, film and episode has Play in VLC or MX Player, Copy link and QR code when you hold OK.</p>
       ${this.row('Download with', name(setting('downloader'), dls, 'Ask every time'), 'pickapp', 'downloader', dls.length ? `Installed: ${dls.map((a) => a.name).join(', ')}` : 'ADM or 1DM not found. Install one from the app store, or use Copy link.')}
-      ${this.row('Installed players', pls.length ? esc(pls.map((a) => a.name).join(', ')) : 'None found', 'noop', '', 'VLC, MX Player and Just Player are picked up automatically')}
+      <h2>Default player</h2>
+      ${[['playerLive', 'Live TV'], ['playerMovie', 'Films'], ['playerSeries', 'Series']].map(([k, l]) => this.row(l, esc(setting(k) && setting(k) !== 'lumen' ? name(setting(k), pls, 'Lumen player') : 'Lumen player'), 'defplayer', k,
+        pls.length ? 'Choose the built-in player, or ' + pls.map((a) => a.name).join(' or ') : 'Install VLC or MX Player from the app store to choose it here')).join('')}
+      <h2>Downloads</h2>
       <div class="st-note">
         <h2>Faster downloads</h2>
         <ul><li>In ADM or 1DM, set downloads to use 8 or more parts (threads). Large films then download several pieces at once.</li>
@@ -174,9 +174,10 @@ export class SettingsScreen {
       ${this.row('Menu button', setting('menuKey') === 'options' ? 'Opens options' : 'Starts voice search', 'pick', 'menuKey', 'The ≡ button on the remote')}
       <div class="st-note">
         <h2>With the Alexa remote</h2>
-        <ol><li>Press ≡ Menu (or select the microphone on the home screen). The search box opens with the Fire TV keyboard.</li>
-        <li>Hold the Alexa button and speak. Your words are typed into the search box and results appear as you talk.</li></ol>
-        <p>Pressing the Alexa button on its own always goes to Alexa. Amazon doesn’t let apps take over that button. You can still say “Alexa, open Lumen” to launch the app.</p>
+        <ol><li>Press ≡ Menu, or select a microphone button in the app. The Amazon keyboard opens.</li>
+        <li>While the keyboard is open, hold the Alexa (mic) button and speak. Your words are typed in.</li>
+        <li>Press the keyboard’s Search key, or Back, and the results appear. Back on an empty box cancels.</li></ol>
+        <p>Pressing the Alexa button when the keyboard isn’t open always goes to Alexa: Amazon doesn’t let apps take over that button. You can say “Alexa, open Lumen TV” to launch the app.</p>
         <h2>Other ways</h2>
         <ul><li>Phone remote: speak into your phone keyboard and the search runs on the TV.</li><li>Google TV and Android TV: the remote’s microphone button works directly.</li></ul>
         <h2>What to say</h2>
@@ -208,6 +209,16 @@ export class SettingsScreen {
     if (a === 'update') { installUpdate(); return; }
     if (a === 'checkupd') { toast('Checking for updates'); const u = await checkForUpdate({ quiet: false }); if (u) { this.show('about'); installUpdate(); } return; }
     if (a === 'lang') { toggleLang(arg); this.repaint(btn); return; }
+    if (a === 'langadd') { toggleLang(arg); toast(`${langById(arg).name} added to your home screen`); this.show('langs'); focusFirst(this.view.querySelector('#st-body')); return; }
+    if (a === 'langedit') { this.editLang(arg); return; }
+    if (a === 'defplayer') {
+      const pls = N.installedApps().filter((x) => x.role === 'player');
+      const cur = setting(arg) || 'lumen';
+      const v = await sheet({ title: { playerLive: 'Live TV plays in', playerMovie: 'Films play in', playerSeries: 'Series play in' }[arg],
+        options: [{ label: 'Lumen player (built in)', value: 'lumen', on: cur === 'lumen', icon: 'play' }, ...pls.map((x) => ({ label: x.name, value: x.pkg, on: cur === x.pkg, icon: 'play' }))] });
+      if (v != null) setting(arg, v);
+      this.repaint(btn); return;
+    }
     if (a === 'langup') { moveLang(arg, -1); this.repaint(btn); return; }
     if (a === 'langrow') {
       const r = new Set((setting('homeLangRows') || 'films,live').split(','));
@@ -390,6 +401,33 @@ export class SettingsScreen {
     if (a && a.closest('#st-body') && k === 'left') { focus(this.view.querySelector('.st-sec.on')); return true; }
     if (a && a.closest('.st-nav') && k === 'left') { focus(document.querySelector('#rail [data-go="settings"]')); return true; }
     return false;
+  }
+
+  // One language: which rows it gets on the home screen, and its place in the order.
+  async editLang(id) {
+    const name = langById(id).name;
+    let focusAt = 0;
+    for (;;) {
+      const rows = langRowsFor(id), i = S.myLangs.indexOf(id);
+      const opts = [
+        { label: `${name} channels`, value: 'live', on: rows.includes('live'), icon: 'tv' },
+        { label: `${name} films`, value: 'films', on: rows.includes('films'), icon: 'film' },
+        { label: `${name} series`, value: 'series', on: rows.includes('series'), icon: 'series' },
+        ...(i > 0 ? [{ label: 'Move up', value: 'up', icon: 'chevron' }] : []),
+        ...(i < S.myLangs.length - 1 ? [{ label: 'Move down', value: 'down', icon: 'chevron' }] : []),
+        { label: `Remove ${name} from home`, value: 'remove', icon: 'eyeOff' },
+      ];
+      const v = await sheet({ title: `${name} on the home screen`, options: opts, focusIndex: focusAt });
+      if (v == null) break;
+      focusAt = Math.max(0, opts.findIndex((o) => o.value === v));
+      if (v === 'up' || v === 'down') { moveLang(id, v === 'up' ? -1 : 1); if (!S.myLangs.includes(id)) break; continue; }
+      if (v === 'remove') { toggleLang(id); toast(`${name} removed from home`); break; }
+      const r = new Set(rows); if (r.has(v)) r.delete(v); else r.add(v);
+      setLangRows(id, ['live', 'films', 'series'].filter((k) => r.has(k)));
+    }
+    this.show('langs');
+    const b = this.view.querySelector(`[data-act="langedit"][data-arg="${id}"]`) || this.view.querySelector('#st-body .f');
+    if (b) focus(b);
   }
 
   focus() { focus(this.view.querySelector('.st-sec.on')); }

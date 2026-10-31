@@ -566,12 +566,12 @@ body.playing #subs { display: block; }
 #overlays:not(:empty) ~ #subs, body:has(.sheet-wrap) #subs { opacity: .25; }
 
 /* ---------- lighter rendering for TV sticks ---------- */
-body.lite .f { transition-duration: .1s; }
+body.lite .f { transition-duration: .08s; }
 body.lite .tile:focus, body.lite .poster-tile:focus { box-shadow: 0 0 0 4px var(--brass); transform: scale(1.04); }
 body.lite .best:focus { transform: none; }
-body.lite .row-track, body.lite .vtrack, body.lite .home-track, body.lite .sr-track, body.lite .st-track { transition-duration: .14s; }
-body.lite .rail { transition-duration: .12s; }
-body.lite .rail-open .rail { box-shadow: 20px 0 40px rgba(0, 0, 0, .5); }
+body.lite .row-track, body.lite .vtrack, body.lite .home-track, body.lite .sr-track, body.lite .st-track { transition-duration: .1s; }
+body.lite .rail, body.lite .rail-item span, body.lite .brand-name { transition: none; }
+body.lite .rail-open .rail { box-shadow: 8px 0 0 rgba(0, 0, 0, .35); }
 body.lite .bub:nth-child(n+4) { display: none; }
 body.lite .art::after { display: none; }
 body.lite .sheet { box-shadow: none; }

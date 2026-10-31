@@ -106,6 +106,14 @@ export function focusFirst(root, sel) {
 export function move(dir, root) {
   const cur = document.activeElement;
   if (!cur || !root.contains(cur) || !cur.classList.contains('f')) { focusFirst(root); return true; }
+  // Fast path: left/right inside a sideways row just steps to the neighbouring tile
+  // (measuring every button on a busy screen for each key press is what makes a TV stick lag).
+  if ((dir === 'left' || dir === 'right') && cur.parentElement && cur.parentElement.parentElement &&
+      cur.parentElement.parentElement.dataset.scroll === 'x') {
+    let n = dir === 'right' ? cur.nextElementSibling : cur.previousElementSibling;
+    while (n && !(n.classList.contains('f') && !n.disabled && !n.hidden)) n = dir === 'right' ? n.nextElementSibling : n.previousElementSibling;
+    if (n) { focus(n); return true; }
+  }
   const scope = cur.closest('[data-trap]') || root;
   const a = cur.getBoundingClientRect();
   const ax = a.left + a.width / 2, ay = a.top + a.height / 2;

@@ -34,7 +34,6 @@ class MainActivity : Activity() {
     private lateinit var bridge: NativeBridge
     lateinit var server: LocalServer
     val updater by lazy { Updater(this) }
-    val textEntry by lazy { TextEntry(this) }
     var pendingVoice = false
 
     @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
@@ -185,6 +184,10 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_TEXT) {
+            bridge.onTextResult(if (resultCode == RESULT_OK) data?.getStringExtra(SearchActivity.EXTRA_TEXT) else null)
+            return
+        }
         if (requestCode == REQ_VOICE) {
             val text = if (resultCode == RESULT_OK) data?.getStringArrayListExtra(RecognizerIntent.EXTRA_RESULTS)?.firstOrNull() else null
             bridge.onVoiceResult(text)
@@ -196,7 +199,6 @@ class MainActivity : Activity() {
     override fun onStop() { player.onStop(); web.onPause(); emit("lifecycle", JSONObject().put("state", "stop")); super.onStop() }
 
     override fun onDestroy() {
-        textEntry.dismiss()
         player.release()
         bridge.release()
         server.stop()
@@ -207,5 +209,6 @@ class MainActivity : Activity() {
     companion object {
         const val REQ_MIC = 41
         const val REQ_VOICE = 42
+        const val REQ_TEXT = 43
     }
 }

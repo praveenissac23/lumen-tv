@@ -1,6 +1,6 @@
 // Home: master search bar, last-channel hero with live preview, content rows.
 import { C, nowNext, itemsIn, progs, needsPin } from '../data.js';
-import { S, continueList, isFav, setting } from '../store.js';
+import { S, continueList, isFav, setting, langRowsFor } from '../store.js';
 import { langById, langItems, newest } from '../languages.js';
 import { itemActions } from '../actions.js';
 import { update, installUpdate } from '../updates.js';
@@ -10,6 +10,21 @@ import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots } from '
 import { prefetchNow, hasProgs } from '../epg.js';
 import { preview, stopPreview, playLive, playVod, playCatchup } from '../player.js';
 import { movieUrl, episodeUrl } from '../data.js';
+
+const CHUNK = 30;   // tiles added to a row at a time
+
+// Newest-first lists, sorted once per catalogue load (sorting 50,000 films on every visit is slow on a TV stick).
+const sorted = new Map();
+function newestAll(key, list) {
+  const k = `${key}:${C.updatedAt}:${list.length}`;
+  let v = sorted.get(k);
+  if (!v) {
+    v = list.slice().sort((a, b) => (b.added || 0) - (a.added || 0));
+    for (const old of sorted.keys()) if (old.startsWith(key + ':')) sorted.delete(old);
+    sorted.set(k, v);
+  }
+  return v;
+}
 
 export class HomeScreen {
   constructor(view, params, app) {
@@ -32,22 +47,22 @@ export class HomeScreen {
     const cont = continueList();
     if (cont.length) rows.push({ key: 'cont', title: 'Continue watching', kind: 'cont', items: cont });
 
-    // Your languages: newest 50 films, channels on now, and series for each one
-    const parts = (setting('homeLangRows') || 'films,live').split(',');
+    // Your languages: the rows chosen for each one (Settings > Home and languages), newest first, unlimited
     for (const id of S.myLangs) {
       const lang = langById(id);
       if (!lang) continue;
+      const parts = langRowsFor(id);
       const ok = (kind) => (it) => !needsPin(kind, it.cat);
       if (parts.includes('films')) {
-        const films = newest(langItems('movie', id).filter(ok('movie')), 50);
+        const films = newestAll('lf-' + id, langItems('movie', id).filter(ok('movie')));
         if (films.length) rows.push({ key: 'lf-' + id, title: `New ${lang.name} films`, kind: 'movie', items: films, more: { screen: 'movies', lang: id } });
       }
       if (parts.includes('live')) {
-        const ch = langItems('live', id).filter(ok('live')).slice(0, 30);
+        const ch = langItems('live', id).filter(ok('live'));
         if (ch.length) rows.push({ key: 'll-' + id, title: `${lang.name} channels`, kind: 'live', items: ch, more: { screen: 'live', lang: id } });
       }
       if (parts.includes('series')) {
-        const se = newest(langItems('series', id).filter(ok('series')), 30);
+        const se = newestAll('ls-' + id, langItems('series', id).filter(ok('series')));
         if (se.length) rows.push({ key: 'ls-' + id, title: `${lang.name} series`, kind: 'series', items: se, more: { screen: 'series', lang: id } });
       }
     }
@@ -55,7 +70,7 @@ export class HomeScreen {
     for (const pin of S.pins) {
       const cat = C.cats[pin.kind].find((c) => c.id === pin.cat);
       if (!cat || needsPin(pin.kind, pin.cat)) continue;
-      const items = pin.kind === 'live' ? itemsIn('live', pin.cat).slice(0, 30) : newest(itemsIn(pin.kind, pin.cat), 50);
+      const items = pin.kind === 'live' ? itemsIn('live', pin.cat) : newestAll(`pin-${pin.kind}-${pin.cat}`, itemsIn(pin.kind, pin.cat));
       if (items.length) rows.push({ key: `pin-${pin.kind}-${pin.cat}`, title: pin.kind === 'live' ? cat.name : `New in ${cat.name}`, kind: pin.kind, items, pinned: true,
         more: { screen: pin.kind === 'movie' ? 'movies' : pin.kind, cat: pin.cat } });
     }
@@ -63,7 +78,7 @@ export class HomeScreen {
     // live sport right now (or whatever category has the most live programmes)
     const sports = C.cats.live.find((c) => /sport/i.test(c.name));
     if (sports && !needsPin('live', sports.id)) {
-      const on = itemsIn('live', sports.id).slice(0, 20);
+      const on = itemsIn('live', sports.id);
       if (on.length) rows.push({ key: 'sport', title: 'Sport channels', kind: 'live', items: on, more: { screen: 'live', cat: sports.id } });
     }
     // catch-up: programmes that finished in the last 6 h on archive channels you watch
@@ -79,9 +94,9 @@ export class HomeScreen {
     cu.sort((a, b) => b.e - a.e);
     if (cu.length) rows.push({ key: 'cu', title: 'Catch up on earlier today', kind: 'cu', items: cu.slice(0, 16) });
 
-    const movies = [...C.movie].filter((m) => !needsPin('movie', m.cat)).sort((a, b) => b.added - a.added).slice(0, 24);
+    const movies = newestAll('movies', C.movie.filter((m) => !needsPin('movie', m.cat)));
     if (movies.length) rows.push({ key: 'movies', title: 'Recently added films', kind: 'movie', items: movies });
-    const series = [...C.series].filter((m) => !needsPin('series', m.cat)).sort((a, b) => b.added - a.added).slice(0, 24);
+    const series = newestAll('series', C.series.filter((m) => !needsPin('series', m.cat)));
     if (series.length) rows.push({ key: 'series', title: 'Series', kind: 'series', items: series });
     return rows;
   }
@@ -140,9 +155,9 @@ export class HomeScreen {
           </div>
         </section>` : ''}
         ${this.rowData.map((r, ri) => `<section class="row row-${r.kind}" data-row="${ri}">
-          <h2>${esc(r.title)}${r.pinned ? icon('pin', 'pinmark') : ''}<small>${r.items.length >= 50 ? 'Latest 50' : ''}</small></h2>
+          <h2>${esc(r.title)}${r.pinned ? icon('pin', 'pinmark') : ''}<small>${r.items.length > 12 ? r.items.length.toLocaleString() : ''}</small></h2>
           <div class="row-clip" data-scroll="x" data-pad="72"><div class="row-track" data-group="row${ri}">
-            ${r.items.map((it, i) => this.tile(r.kind, it, i)).join('')}
+            ${r.items.slice(0, (r.shown = Math.min(r.items.length, CHUNK))).map((it, i) => this.tile(r.kind, it, i)).join('')}
             ${r.more ? `<button class="f tile more-tile ${r.kind === 'movie' || r.kind === 'series' ? 'tall' : ''}" data-k="more">${icon('chevron')}<span>See all</span></button>` : ''}
           </div></div></section>`).join('')}
         ${!this.rowData.length ? `<section class="empty"><h2>Add a playlist to get started</h2><p>Open Settings and add your Xtream login or M3U link.</p></section>` : ''}
@@ -168,6 +183,21 @@ export class HomeScreen {
       this.open(t.dataset.k, t.dataset.id, t.dataset.i != null ? row.items[+t.dataset.i] : null, row);
     });
     v.addEventListener('focused', (e) => {
+      // rows are endless: add the next tiles when focus gets near the last one shown
+      const tile = e.target.closest('.tile');
+      const rowEl = tile && tile.closest('[data-row]');
+      if (rowEl && tile.dataset.k !== 'more') {
+        const r = this.rowData[+rowEl.dataset.row];
+        const idx = [...tile.parentElement.children].indexOf(tile);
+        if (r && r.shown < r.items.length && idx >= r.shown - 8) {
+          const from = r.shown, to = Math.min(r.items.length, from + CHUNK);
+          r.shown = to;
+          const html = r.items.slice(from, to).map((it, k) => this.tile(r.kind, it, from + k)).join('');
+          const more = tile.parentElement.querySelector('.more-tile');
+          if (more) more.insertAdjacentHTML('beforebegin', html); else tile.parentElement.insertAdjacentHTML('beforeend', html);
+          patchNowSlots(rowEl);
+        }
+      }
       // focusing the hero region keeps the page at the top; rows scroll the page
       const inHero = e.target.closest('.hero, .topbar');
       const scroller = v.querySelector('.home-scroll');

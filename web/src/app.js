@@ -151,7 +151,13 @@ function appKey(k, e) {
   if (current && current.ctl.onKey && current.ctl.onKey(k, e) === true) return true;
   const inRail = $('#rail').contains(document.activeElement);
   if (k === 'back') {
-    if (inRail) { if (current) current.ctl.focus ? current.ctl.focus() : focusFirst($('#view')); return true; }
+    if (inRail) { back(); return true; }
+    // In a row scrolled sideways, Back first returns to the start of the row.
+    const a = document.activeElement;
+    const track = a && a.closest('[data-scroll="x"] > *');
+    if (track) { const first = track.querySelector('.f'); if (first && first !== a) { focus(first); return true; } }
+    // On a main screen, Back opens the side menu (Back again goes Home, then asks to exit).
+    if (!stack.length) { focusRail(); return true; }
     back(); return true;
   }
   if (k.startsWith('char:')) {
