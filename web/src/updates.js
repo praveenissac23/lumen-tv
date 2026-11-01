@@ -43,13 +43,25 @@ export async function checkForUpdate({ quiet = true } = {}) {
   }
 }
 
-// Check on start, then every 6 hours while the app is open.
+// Check on start, hourly, and when the app comes back to the screen.
+// With "Update the app automatically" on (TV), a new build downloads by itself and
+// Android's Install screen appears: one press. Never while something is playing.
+async function autoUpdate() {
+  const u = await checkForUpdate();
+  if (!u || isMac() || setting('autoAppUpdate') === false || update.autoTried === u.build) return;
+  if (document.body.classList.contains('playing') || document.querySelector('#overlays .sheet-wrap')) {
+    setTimeout(autoUpdate, 60 * 1000);          // try again once playback / menus are closed
+    return;
+  }
+  update.autoTried = u.build;
+  const s = installUpdate();
+  if (s && N.device().canInstall !== false) { const b = s.root.querySelector('[data-a=go]'); if (b) b.click(); }
+}
 export function startUpdateChecks() {
   if (!N.isNative || setting('autoUpdateCheck') === false) return;
-  setTimeout(() => checkForUpdate(), 4000);
-  setInterval(() => checkForUpdate(), 60 * 60 * 1000);
-  // also whenever the app comes back to the screen, at most every 10 minutes
-  document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - update.checkedAt > 10 * 60 * 1000) checkForUpdate(); });
+  setTimeout(autoUpdate, 5000);
+  setInterval(autoUpdate, 60 * 60 * 1000);
+  document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - update.checkedAt > 10 * 60 * 1000) autoUpdate(); });
 }
 
 // Full-screen update sheet: permission check first (Fire TV), progress, a step-by-step log,

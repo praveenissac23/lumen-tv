@@ -236,6 +236,7 @@ export class SettingsScreen {
     return `<h1>About</h1>
       ${this.row('App version', `Lumen TV ${esc(N.device().version || '')}`, 'noop', '', `Build ${currentBuild() || '-'}`)}
       ${update.available ? this.row(`Install update (build ${update.available.build})`, '<span class="pill on">Install</span>', 'update') : this.row('Check for updates', icon('refresh'), 'checkupd', '', 'Updates are also checked automatically')}
+      ${this.row('Update the app automatically', this.toggle(setting('autoAppUpdate') !== false), 'tog', 'autoAppUpdate', 'New builds download by themselves; you only press Install')}
       ${this.row('Device', esc(d.model || ''), 'noop')}
       ${this.row('Start-up time', `${window.__bootMs ?? '-'} ms`, 'noop', '', 'Time to show the home screen from cache')}
       ${this.row('Channels, films and series', `${C.live.length}, ${C.movie.length}, ${C.series.length}`, 'noop')}
