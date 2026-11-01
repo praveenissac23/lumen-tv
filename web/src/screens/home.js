@@ -41,12 +41,17 @@ export class HomeScreen {
   rows() {
     const rows = [];
     const favs = itemsIn('live', '__fav').slice(0, 20);
-    const recent = S.recentLive.map((id) => C.byId.live.get(id)).filter((c) => c && !favs.includes(c)).slice(0, 20);
-    // Films and episodes you started, most recent first, always the first row
-    const cont = continueList();
-    if (cont.length) rows.push({ key: 'cont', title: 'Keep watching', kind: 'cont', items: cont });
-    if (favs.length) rows.push({ key: 'fav', title: 'Favourite channels', kind: 'live', items: favs });
-    if (recent.length) rows.push({ key: 'recent', title: 'Recently watched channels', kind: 'live', items: recent });
+    const recent = S.recentLive.map((id) => C.byId.live.get(id)).filter(Boolean);
+    // 1. Continue watching: films and episodes you stopped part-way, newest first
+    const cont = continueList().slice(0, 5);
+    if (cont.length) rows.push({ key: 'cont', title: 'Continue watching', kind: 'cont', items: cont });
+    // 2. Recently watched channels
+    const rch = recent.filter((c) => !needsPin('live', c.cat)).slice(0, 5);
+    if (rch.length) rows.push({ key: 'recent', title: 'Recently watched channels', kind: 'live', items: rch, more: { screen: 'live', cat: '__recent' } });
+    // 3. Recently watched films and series
+    const rv = (S.recentVod || []).slice(0, 5);
+    if (rv.length) rows.push({ key: 'rv', title: 'Recently watched films and series', kind: 'rv', items: rv });
+    if (favs.length) rows.push({ key: 'fav', title: 'Favourite channels', kind: 'live', items: favs, more: { screen: 'live', cat: '__fav' } });
 
     // Your languages: the rows chosen for each one (Settings > Home and languages), newest first, unlimited
     for (const id of S.myLangs) {
@@ -76,29 +81,7 @@ export class HomeScreen {
         more: { screen: pin.kind === 'movie' ? 'movies' : pin.kind, cat: pin.cat } });
     }
 
-    // live sport right now (or whatever category has the most live programmes)
-    const sports = C.cats.live.find((c) => /sport/i.test(c.name));
-    if (sports && !needsPin('live', sports.id)) {
-      const on = itemsIn('live', sports.id);
-      if (on.length) rows.push({ key: 'sport', title: 'Sport channels', kind: 'live', items: on, more: { screen: 'live', cat: sports.id } });
-    }
-    // catch-up: programmes that finished in the last 6 h on archive channels you watch
-    const cu = [];
-    const t = now();
-    // only channels you actually watch: each one is a guide lookup
-    const pool = [...new Set([...favs, ...recent])].filter((c) => c.arch && !needsPin('live', c.cat)).slice(0, 12);
-    this.cuPool = pool;
-    for (const ch of pool) {
-      for (const p of progs(ch)) if (p[1] < t && p[1] > t - 6 * 3600 && p[1] - p[0] >= 1800) cu.push({ ch, s: p[0], e: p[1], t: p[2], d: p[3] });
-      if (cu.length > 60) break;
-    }
-    cu.sort((a, b) => b.e - a.e);
-    if (cu.length) rows.push({ key: 'cu', title: 'Catch up on earlier today', kind: 'cu', items: cu.slice(0, 16) });
-
-    const movies = newestAll('movies', C.movie.filter((m) => !needsPin('movie', m.cat)));
-    if (movies.length) rows.push({ key: 'movies', title: 'Recently added films', kind: 'movie', items: movies });
-    const series = newestAll('series', C.series.filter((m) => !needsPin('series', m.cat)));
-    if (series.length) rows.push({ key: 'series', title: 'Series', kind: 'series', items: series });
+    this.cuPool = [];
     return rows;
   }
 
@@ -122,6 +105,10 @@ export class HomeScreen {
         <span class="ct-now">${hhmm(it.s)}–${hhmm(it.e)}</span>
         <span class="cu-badge">${icon('history')}Catch-up</span></button>`;
     }
+    if (kind === 'rv') {
+      return `<button class="f tile poster-tile" data-k="rv" data-i="${i}">
+        ${poster({ name: it.title, img: it.poster })}<span class="pt-cap"><b>${esc(it.title)}</b><small>${esc(it.sub || (it.kind === 'movie' ? 'Film' : ''))}</small></span></button>`;
+    }
     return `<button class="f tile poster-tile" data-k="${kind}" data-id="${esc(it.id)}">
       ${poster(it)}<span class="pt-cap"><b>${esc(it.name)}</b><small>${it.year || ''}${it.rating ? ' ' : ''}${stars(it.rating)}</small></span></button>`;
   }
@@ -132,6 +119,8 @@ export class HomeScreen {
     this.rowData = this.rows();
     const hour = new Date().getHours();
     const greet = hour < 5 ? 'Good night' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
+    const layout = this.layout = this.params.layout || setting('homeLayout') || 'rows';
+    this.view.classList.toggle('home-compact', layout === 'compact');
     this.view.innerHTML = `
       <div class="home-scroll" data-scroll="y"><div class="home-track">
         <header class="topbar">
@@ -142,7 +131,8 @@ export class HomeScreen {
           ${update.available ? `<button class="f update-pill" id="home-update">${icon('download')}Update available</button>` : ''}
           <div class="topbar-right"><span class="greet">${greet}</span><span class="clock" data-clock>${hhmm(now())}</span></div>
         </header>
-        ${ch ? `<section class="hero" data-group="hero">
+        ${this.top(ch)}
+        ${ch && layout === 'hero' ? `<section class="hero" data-group="hero">
           <div class="hero-video" id="hero-video"><div class="preview-msg" hidden></div></div>
           <div class="hero-info">
             <p class="hero-kicker">${S.recentLive[0] ? 'Pick up where you left off' : 'On now'}</p>
@@ -173,6 +163,14 @@ export class HomeScreen {
     this.onUpd = () => { if (!this.view.querySelector('#home-update') && this.app.current() && this.app.current().ctl === this) this.app.reload(); };
     document.addEventListener('update-available', this.onUpd);
     const w = v.querySelector('#hero-watch'); if (w) w.onclick = () => this.watch(this.hero);
+    v.querySelectorAll('.shortcut').forEach((b) => { b.onclick = () => (b.dataset.go === 'search' ? this.app.go('search', {}) : this.app.go(b.dataset.go, {})); });
+    const sp = v.querySelector('#spot-play');
+    if (sp) sp.onclick = () => {
+      const c = this.rowData.find((r) => r.kind === 'cont');
+      if (sp.dataset.k === 'cont' && c) this.open('cont', null, c.items[0], c); else if (this.hero) this.watch(this.hero);
+    };
+    this.onProg = () => { if (this.app.current() && this.app.current().ctl === this) this.app.reload(); };
+    document.addEventListener('progress-changed', this.onProg);
     const g = v.querySelector('#hero-guide'); if (g) g.onclick = () => this.app.go('guide', { ch: this.hero.id });
     const o = v.querySelector('#hero-over'); if (o) o.onclick = () => { const nn = nowNext(this.hero); if (nn && nn.now) playCatchup(this.hero, nn.now, C.live, () => this.app.reload()); else this.watch(this.hero); };
     prefetchNow(this.rowData.flatMap((r) => (r.kind === 'live' ? r.items.slice(0, 12) : [])));
@@ -231,6 +229,31 @@ export class HomeScreen {
     this.previewTimer = setTimeout(() => this.startPreview(), 500);
   }
 
+  // The area under the search bar, depending on Settings > Home and languages > Home screen style.
+  top(ch) {
+    const L = this.layout;
+    if (L === 'shortcuts') {
+      const items = [['live', 'live', 'Live TV'], ['guide', 'guide', 'TV guide'], ['movies', 'film', 'Films'], ['series', 'series', 'Series'], ['favourites', 'heart', 'Favourites'], ['search', 'search', 'Search']];
+      return `<section class="shortcuts" data-group="sc">${items.map(([go, ic, l]) => `<button class="f shortcut" data-go="${go}">${icon(ic)}<span>${l}</span></button>`).join('')}</section>`;
+    }
+    if (L === 'spotlight') {
+      const c = this.rowData.find((r) => r.kind === 'cont');
+      const it = c && c.items[0];
+      if (it) {
+        return `<section class="spotlight" data-group="spot"><button class="f spot-card" id="spot-play" data-k="cont">
+          ${poster({ name: it.title, img: it.poster }, true)}
+          <span class="spot-info"><small>Continue watching</small><b>${esc(it.title)}</b><span>${esc(it.sub || '')}</span>
+          ${it.dur > 0 ? progressBar(it.pos / it.dur) : ''}<em>${icon('play')}Resume</em></span></button></section>`;
+      }
+      if (ch) {
+        return `<section class="spotlight" data-group="spot"><button class="f spot-card live" id="spot-play" data-k="live">
+          <span class="spot-logo">${logo(ch, 'lg')}</span>
+          <span class="spot-info"><small>Your last channel</small><b>${esc(ch.name)}</b>${nowSlot(ch, 'best')}<em>${icon('play')}Watch</em></span></button></section>`;
+      }
+    }
+    return '';
+  }
+
   // Add the next tiles to an endless row.
   growRow(rowEl) {
     const r = this.rowData[+rowEl.dataset.row];
@@ -264,6 +287,9 @@ export class HomeScreen {
     } else if (kind === 'cont') {
       const url = data.key.startsWith('movie:') ? movieUrl({ id: data.key.slice(6), ext: data.ext, url: data.url }) : episodeUrl({ id: data.key.slice(3), ext: data.ext, url: data.url });
       playVod({ ...data, url }, data.key, () => this.app.reload());
+    } else if (kind === 'rv') {
+      if (data.seriesId) this.app.go('detail', { kind: 'series', id: data.seriesId });
+      else this.app.go('detail', { kind: 'movie', id: data.id });
     } else if (kind === 'cu') {
       playCatchup(data.ch, data, C.live, () => this.app.reload());
     } else {
@@ -272,7 +298,7 @@ export class HomeScreen {
   }
 
   onKey(k, e) {
-    if (k !== 'hold' && k !== 'menu') return false;
+    if (k !== 'hold') return false;   // ≡ Menu stays search everywhere; hold OK opens a tile's options
     const t = document.activeElement && document.activeElement.closest('.tile');
     if (!t || t.dataset.k === 'more') return false;
     const row = this.rowData[+t.closest('[data-row]').dataset.row];
@@ -296,7 +322,7 @@ export class HomeScreen {
       const t = this.view.querySelector(r.sel);
       if (t) { focus(t); return; }
     }
-    focus(this.view.querySelector('#hero-watch') || this.view.querySelector('.tile') || this.view.querySelector('#home-search'));
+    focus(this.view.querySelector('#spot-play') || this.view.querySelector('#hero-watch') || this.view.querySelector('.shortcut') || this.view.querySelector('.tile') || this.view.querySelector('#home-search'));
   }
 
   save() {
@@ -320,7 +346,8 @@ export class HomeScreen {
     }
   }
 
-  destroy() { clearTimeout(this.previewTimer); stopPreview(); document.removeEventListener('update-available', this.onUpd); }
+  destroy() {
+    document.removeEventListener('progress-changed', this.onProg); clearTimeout(this.previewTimer); stopPreview(); document.removeEventListener('update-available', this.onUpd); }
 }
 
 // rect of an element in stage coordinates

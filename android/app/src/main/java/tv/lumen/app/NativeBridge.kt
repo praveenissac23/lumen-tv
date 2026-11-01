@@ -322,6 +322,13 @@ class NativeBridge(private val act: MainActivity) {
             act.runOnUiThread {
                 try {
                     if (pkg.isEmpty()) act.startActivity(Intent.createChooser(intent, if (download) "Download with" else "Play with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    else if (!download && intent.action == Intent.ACTION_VIEW) {
+                        // Players report where you stopped when they close (VLC: extra_position, MX: position),
+                        // so Continue watching works with them too. That needs a result, so no new task.
+                        intent.flags = intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
+                        intent.putExtra("return_result", true)
+                        act.startActivityForResult(intent, MainActivity.REQ_EXT)
+                    }
                     else act.startActivity(intent)
                 } catch (e: ActivityNotFoundException) {
                     emit("toast", JSONObject().put("text", "That app couldn\u2019t open the link"))
@@ -428,6 +435,25 @@ class NativeBridge(private val act: MainActivity) {
         } catch (e: Exception) {
             emit("textinput", JSONObject().put("text", JSONObject.NULL))
         }
+    }
+
+    fun onPlayerResult(data: Intent?) {
+        val x = data?.extras
+        var pos = -1L; var dur = 0L
+        if (x != null) {
+            pos = when {
+                x.containsKey("extra_position") -> x.getLong("extra_position", -1)           // VLC
+                x.containsKey("position") -> (x.get("position") as? Number)?.toLong() ?: -1  // MX Player, Just Player
+                else -> -1
+            }
+            dur = when {
+                x.containsKey("extra_duration") -> x.getLong("extra_duration", 0)
+                x.containsKey("duration") -> (x.get("duration") as? Number)?.toLong() ?: 0
+                else -> 0
+            }
+        }
+        val done = x?.getString("end_by") == "playback_completion"
+        emit("extplayer", JSONObject().put("pos", pos).put("dur", dur).put("done", done))
     }
 
     fun onTextResult(text: String?) { emit("textinput", JSONObject().put("text", text ?: JSONObject.NULL)) }

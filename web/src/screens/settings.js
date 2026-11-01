@@ -103,6 +103,7 @@ export class SettingsScreen {
     const shows = (id) => { const r = langRowsFor(id); return ['live', 'films', 'series'].filter((k) => r.includes(k)).map((k) => NAMES[k]).join(' + ') || 'Nothing on home'; };
     return `<h1>Home and languages</h1>
       <p class="st-intro">Each language you add gets its own rows on the home screen, newest first, as long as you keep scrolling. Press OK on a language to choose its rows or change the order. Hold OK on any category in Live TV or Films to pin it to the home screen too.</p>
+      ${this.row('Home screen style', { rows: 'Just rows', hero: 'Live preview on top', shortcuts: 'Shortcut buttons', spotlight: 'Big Continue card', compact: 'Compact rows' }[setting('homeLayout') || 'rows'], 'pick', 'homeLayout', 'Continue watching, recent channels and recent films come first in every style')}
       <h2>Your languages, in home screen order</h2>
       ${mine.map((l, i) => this.row(`${i + 1}. ${l.name}`, `<span class="pill">${esc(shows(l.id))}</span>`, 'langedit', l.id, count(l))).join('') || '<p class="st-intro">None yet. Add one below.</p>'}
       ${S.pins.length ? `<h2>Pinned to home</h2>${S.pins.map((p) => { const c = C.cats[p.kind].find((x) => x.id === p.cat); return c ? this.row(c.name, `<span class="pill">Remove</span>`, 'unpin', p.kind + ':' + p.cat, { live: 'Live TV', movie: 'Films', series: 'Series' }[p.kind]) : ''; }).join('')}` : ''}
@@ -282,6 +283,7 @@ export class SettingsScreen {
         menuKey: [['voice', 'Starts voice search'], ['options', 'Opens options']],
         epgOffsetHours: [-3, -2, -1, 0, 1, 2, 3].map((h) => [h, h === 0 ? 'No shift' : `${h > 0 ? '+' : ''}${h} h`]),
         startScreen: [['home', 'Home'], ['live', 'Live TV'], ['guide', 'TV guide']],
+        homeLayout: [['rows', 'Just rows'], ['hero', 'Live preview on top'], ['shortcuts', 'Shortcut buttons'], ['spotlight', 'Big Continue card'], ['compact', 'Compact rows']],
         subSize: [['s', 'Small'], ['m', 'Medium'], ['l', 'Large']],
         uiSize: [['s', 'Smaller (if edges are cut off)'], ['m', 'Fit the TV'], ['l', 'Larger']],
       }[arg];

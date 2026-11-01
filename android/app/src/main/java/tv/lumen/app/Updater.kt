@@ -111,6 +111,12 @@ class Updater(private val act: MainActivity) {
             if (!opened) emit("update", JSONObject().put("state", "permission-manual"))
             return
         }
+        // Fire TV: use the classic install screen first (what Downloader and "Send files to TV" use).
+        if (isFireTv()) {
+            openSystemInstaller(apk, emit)
+            if (installScreenAt > 0) return
+            log(emit, "Trying Android’s package installer instead")
+        }
         try {
             installWithSession(apk)
             log(emit, "Handed to Android’s installer")
@@ -154,9 +160,11 @@ class Updater(private val act: MainActivity) {
             .putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true).putExtra(Intent.EXTRA_RETURN_RESULT, false))
             || tryStart(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
         log(emit, if (ok) "Opened the install screen" else "The install screen couldn’t be opened")
-        installScreenAt = System.currentTimeMillis()
+        installScreenAt = if (ok) System.currentTimeMillis() else 0L
     }
     private var installScreenAt = 0L
+
+    private fun isFireTv() = act.packageManager.hasSystemFeature("amazon.hardware.fire_tv") || Build.MODEL.startsWith("AFT")
 
     private fun tryStart(i: Intent): Boolean = try {
         act.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
@@ -174,7 +182,7 @@ class Updater(private val act: MainActivity) {
         if (installScreenAt > 0 && System.currentTimeMillis() - installScreenAt < 4000) {
             installScreenAt = 0
             log(emit, "The install screen closed straight away")
-            emit("update", JSONObject().put("state", "error").put("msg", "The TV closed the install screen. Use the Downloader option below."))
+            emit("update", JSONObject().put("state", "error").put("msg", "The TV closed the install screen straight away. Check Install unknown apps is on for Lumen TV, or use the Downloader option below."))
         }
         val apk = pendingApk ?: return
         if (Build.VERSION.SDK_INT >= 26 && !act.packageManager.canRequestPackageInstalls()) {

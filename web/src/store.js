@@ -7,6 +7,7 @@ const DEFAULTS = {
   active: 'demo',
   favs: { live: [], movie: [], series: [] },
   recentLive: [],          // channel ids, newest first
+  recentVod: [],           // films and episodes started, newest first: {key, kind, id, seriesId, title, sub, poster, t}
   progress: {},            // "movie:ID" / "ep:ID" -> {pos, dur, t, title, poster, seriesId}
   pin: '0000',
   locked: {},              // "live:catId" -> true
@@ -41,6 +42,7 @@ const DEFAULTS = {
     homeLangRows: 'films,live', // which rows each language gets
     uiSize: 'm',           // s | m | l  screen size adjustment
     lite: true,            // lighter animations for TV sticks
+    homeLayout: 'rows',    // rows | hero | shortcuts | spotlight | compact
   },
 };
 
@@ -73,6 +75,11 @@ export function toggleFav(kind, id) {
 }
 
 // ---- recent channels ----
+export function pushRecentVod(e) {
+  const key = e.seriesId ? 'series:' + e.seriesId : e.key;   // a series appears once, with its latest episode
+  state.recentVod = [{ ...e, rkey: key, t: Date.now() }, ...(state.recentVod || []).filter((x) => (x.rkey || x.key) !== key)].slice(0, 30);
+  save();
+}
 export function pushRecentLive(id) {
   id = String(id);
   state.recentLive = [id, ...state.recentLive.filter((x) => x !== id)].slice(0, 30);

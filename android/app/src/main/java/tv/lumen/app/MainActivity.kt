@@ -186,6 +186,7 @@ class MainActivity : Activity() {
     @Deprecated("Deprecated in Java")
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
+        if (requestCode == REQ_EXT) { bridge.onPlayerResult(data); return }
         if (requestCode == REQ_TEXT) {
             bridge.onTextResult(if (resultCode == RESULT_OK) data?.getStringExtra(SearchActivity.EXTRA_TEXT) else null)
             return
@@ -212,5 +213,6 @@ class MainActivity : Activity() {
         const val REQ_MIC = 41
         const val REQ_VOICE = 42
         const val REQ_TEXT = 43
+        const val REQ_EXT = 44
     }
 }

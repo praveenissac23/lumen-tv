@@ -1,7 +1,7 @@
 // Full-screen playback with on-screen display, zapping, number entry and catch-up.
 import * as N from './native.js';
 import { C, nowNext, liveUrl, catchupUrl, progs } from './data.js';
-import { S, set, setting, pushRecentLive, saveProgress, progressOf, isFav, toggleFav } from './store.js';
+import { S, set, setting, pushRecentLive, pushRecentVod, saveProgress, progressOf, isFav, toggleFav } from './store.js';
 import { $, esc, hhmm, duration, minutesLeft, now, el } from './util.js';
 import { pushLayer, popLayer, focus } from './nav.js';
 import { icon, logo, progressBar, toast, sheet, VList, nowSlot, patchNowSlots } from './ui.js';
@@ -144,6 +144,15 @@ export function preview(ch, rect) {
 }
 export function stopPreview() { if (P.previewCh && !P.mode) N.stop(); P.previewCh = null; if (!P.mode) hole(null); }
 
+// VLC / MX Player closed: keep the resume point they reported, so Continue watching works with them too.
+N.on('extplayer', (d) => {
+  const x = P.ext; P.ext = null;
+  if (!x || !x.resumeKey) return;
+  if (d.done) saveProgress(x.resumeKey, { ...x.item, pos: d.dur || 1, dur: d.dur || 1 });
+  else if (d.pos > 0) saveProgress(x.resumeKey, { ...x.item, pos: d.pos, dur: d.dur || 0 });
+  document.dispatchEvent(new CustomEvent('progress-changed'));
+});
+
 // ---------- default player per section (Settings > Downloads and players) ----------
 // Returns true when the video was handed to VLC / MX Player instead of the built-in player.
 function viaDefaultPlayer(section, url, title, position = 0) {
@@ -191,7 +200,12 @@ export function playVod(item, resumeKey, onExit, queue) {
   const section = item.kind === 'episode' || (resumeKey && resumeKey.startsWith('ep:')) ? 'series' : 'movie';
   const saved = resumeKey && progressOf(resumeKey);
   const title = item.sub && section === 'series' ? `${item.title} – ${item.sub}` : item.title;
-  if (!P.mode && viaDefaultPlayer(section, urlOr(item.url), title, saved ? saved.pos : 0)) return;
+  pushRecentVod({ key: resumeKey, kind: section === 'series' ? 'episode' : 'movie', id: item.id, seriesId: item.seriesId, title: item.seriesName || item.title,
+    sub: item.sub || '', poster: item.poster, url: item.url, ext: item.ext });
+  if (!P.mode && viaDefaultPlayer(section, urlOr(item.url), title, saved ? saved.pos : 0)) {
+    P.ext = { item, resumeKey, startedAt: Date.now() };   // VLC / MX report the position back when they close
+    return;
+  }
   P.onExit = onExit || P.onExit;
   enter('vod');
   P.mode = 'vod'; P.item = item; P.resumeKey = resumeKey; P.ch = null;
