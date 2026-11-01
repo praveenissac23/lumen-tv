@@ -59,14 +59,14 @@ export function imgUrl(url, w) {
 // Channel logo with a monogram fallback; real logos load lazily and replace it.
 export function logo(ch, size = '') {
   const t = tint(ch.name);
-  const img = ch.logo ? `<img loading="lazy" decoding="async" src="${esc(imgUrl(ch.logo, size === 'lg' ? 300 : 128))}" alt="" onerror="this.remove()">` : '';
+  const img = ch.logo ? `<img decoding="async" src="${esc(imgUrl(ch.logo, size === 'lg' ? 300 : 128))}" alt="" onerror="this.remove()">` : '';
   return `<span class="logo ${size}" style="--la:${t.a};--lb:${t.b};--li:${t.ink}"><b>${esc(initials(ch.name))}</b>${img}</span>`;
 }
 
 // Poster: real image, or generated typographic artwork from the title.
 export function poster(item, landscape = false) {
   const t = tint(item.name);
-  const img = item.img ? `<img loading="lazy" decoding="async" src="${esc(imgUrl(item.img, landscape ? 960 : 320))}" alt="" onerror="this.remove()">` : '';
+  const img = item.img ? `<img decoding="async" src="${esc(imgUrl(item.img, landscape ? 960 : 320))}" alt="" onerror="this.remove()">` : '';
   const words = item.name.split(' ');
   return `<span class="art ${landscape ? 'land' : ''}" style="--la:${t.a};--lb:${t.b};--li:${t.ink}">
     <span class="art-title">${esc(words.length > 4 ? words.slice(0, 4).join(' ') + '…' : item.name)}</span>${img}</span>`;

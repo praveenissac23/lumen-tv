@@ -116,7 +116,7 @@ enum Net {
 /// Channel logos and posters, downscaled once and cached on disk.
 final class Thumbs {
     private let dir = App.caches.appendingPathComponent("thumbs", isDirectory: true)
-    private let gate = DispatchSemaphore(value: 4)
+    private let gate = DispatchSemaphore(value: 8)
 
     init() {
         try? FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
@@ -138,7 +138,14 @@ final class Thumbs {
         if let d = try? Data(contentsOf: jpg) { return (d, "image/jpeg") }
         if let d = try? Data(contentsOf: png) { return (d, "image/png") }
         gate.wait(); defer { gate.signal() }
-        guard let raw = try? Net.get(src, timeout: 15), raw.count < 8_000_000,
+        var fetchURL = src
+        if src.contains("image.tmdb.org/t/p/"), let r = src.range(of: #"/t/p/[^/]+/"#, options: .regularExpression) {
+            let size = w <= 185 ? "w185" : w <= 342 ? "w342" : w <= 500 ? "w500" : "w780"
+            fetchURL = src.replacingCharacters(in: r, with: "/t/p/\(size)/")
+        }
+        var got: Data? = try? Net.get(fetchURL, timeout: 8)
+        if got == nil && fetchURL != src { got = try? Net.get(src, timeout: 8) }
+        guard let raw = got, raw.count < 8_000_000,
               let isrc = CGImageSourceCreateWithData(raw as CFData, nil) else { return nil }
         let opts: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true,
