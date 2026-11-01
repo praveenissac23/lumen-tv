@@ -47,6 +47,7 @@ class NativeBridge(private val act: MainActivity) {
             .put("model", "${Build.MANUFACTURER} ${Build.MODEL}").put("version", BuildConfig.VERSION_NAME)
             .put("versionCode", BuildConfig.VERSION_CODE)
             .put("sdk", Build.VERSION.SDK_INT)
+            .put("recovered", act.recovered)
             .put("cssW", viewCss().first).put("cssH", viewCss().second).toString()
     }
 
@@ -235,7 +236,7 @@ class NativeBridge(private val act: MainActivity) {
 
     // ---------- player ----------
     @JavascriptInterface
-    fun play(url: String, opts: String) = ui { act.player.play(url, JSONObject(opts)) }
+    fun play(url: String, opts: String) = ui { act.recovered = false; act.player.play(url, JSONObject(opts)) }
 
     @JavascriptInterface
     fun stop() = ui { act.player.stop() }

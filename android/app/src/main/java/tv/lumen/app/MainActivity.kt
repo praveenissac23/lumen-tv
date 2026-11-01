@@ -35,6 +35,7 @@ class MainActivity : Activity() {
     lateinit var server: LocalServer
     val updater by lazy { Updater(this) }
     var pendingVoice = false
+    @Volatile var recovered = false
 
     @SuppressLint("SetJavaScriptEnabled", "JavascriptInterface")
     override fun onCreate(savedInstanceState: Bundle?) {
@@ -112,6 +113,7 @@ class MainActivity : Activity() {
             // If Android kills the interface process (low memory), rebuild it instead of crashing the app.
             override fun onRenderProcessGone(view: WebView?, detail: RenderProcessGoneDetail?): Boolean {
                 if (view !== web) return true
+                recovered = true      // the page reloads; it continues what was playing instead of starting over
                 try { rootView.removeView(web); web.destroy() } catch (e: Exception) { }
                 web = buildWebView()
                 rootView.addView(web, FrameLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT))

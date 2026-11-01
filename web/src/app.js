@@ -8,7 +8,7 @@ import { icon, toast, pinPad, patchNowSlots } from './ui.js';
 import { mountBackground, applyLook } from './look.js';
 import { startUpdateChecks } from './updates.js';
 import { search, parseSpoken } from './search.js';
-import { player, playLive, exit as exitPlayer, stopPreview, onEpg as playerEpg } from './player.js';
+import { player, playLive, playVod, exit as exitPlayer, stopPreview, onEpg as playerEpg } from './player.js';
 import { HomeScreen } from './screens/home.js';
 import { LiveScreen } from './screens/live.js';
 import { GuideScreen } from './screens/guide.js';
@@ -330,6 +330,9 @@ function start() {
   const startOn = setting('startScreen') || 'home';
   go(SCREENS[startOn] ? startOn : 'home', {}, { root: true });
   const last = S.recentLive[0] && C.byId.live.get(S.recentLive[0]);
+  const np = S.nowPlaying;
+  if (np && np.item && N.isNative && N.device().recovered) { playVod(np.item, np.resumeKey, () => reload()); return; }
+  if (np) set('nowPlaying', null);
   if (setting('autoplayLast') && last && N.isNative && !needsPin('live', last.cat)) playLive(last, C.live, () => reload());
 }
 

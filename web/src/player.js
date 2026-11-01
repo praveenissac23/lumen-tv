@@ -1,7 +1,7 @@
 // Full-screen playback with on-screen display, zapping, number entry and catch-up.
 import * as N from './native.js';
 import { C, nowNext, liveUrl, catchupUrl, progs } from './data.js';
-import { S, setting, pushRecentLive, saveProgress, progressOf, isFav, toggleFav } from './store.js';
+import { S, set, setting, pushRecentLive, saveProgress, progressOf, isFav, toggleFav } from './store.js';
 import { $, esc, hhmm, duration, minutesLeft, now, el } from './util.js';
 import { pushLayer, popLayer, focus } from './nav.js';
 import { icon, logo, progressBar, toast, sheet, VList, nowSlot, patchNowSlots } from './ui.js';
@@ -26,28 +26,52 @@ export const player = P;
 const root = () => $('#player-ui');
 
 N.on('progress', (d) => {
-  P.pos = d.pos; P.dur = d.dur;
-  if (P.mode === 'vod' && P.resumeKey && Math.round(d.pos / 1000) % 10 === 0) saveProgress(P.resumeKey, { pos: d.pos, dur: d.dur, ...P.item });
+  P.pos = d.pos; P.dur = d.dur || P.dur;
+  // keep the resume point fresh (every 5 s of playback), so a dropped stream or a restart loses almost nothing
+  if (P.mode === 'vod' && P.resumeKey && Math.abs(d.pos - (P.savedAt || 0)) >= 5000) {
+    P.savedAt = d.pos;
+    saveProgress(P.resumeKey, { ...P.item, pos: d.pos, dur: P.dur });
+  }
+  if (d.pos > 20000 && P.drops) P.drops = 0;   // playing steadily again
   if (P.mode && osdVisible()) paintProgress();
 });
 N.on('player', (d) => {
   const status = $('#player-status');
-  if (d.state === 'buffering') status && (status.className = 'pstatus show', status.innerHTML = '<i class="spinner"></i>');
+  if (d.state === 'buffering') {
+    status && (status.className = 'pstatus show', status.innerHTML = '<i class="spinner"></i>');
+    // Stuck loading without an error (a server that stops sending): restart live, reconnect films where they were
+    clearTimeout(P.stallTimer);
+    if (P.mode) P.stallTimer = setTimeout(() => {
+      if (P.mode === 'live') restart(); else if (P.mode === 'vod' || P.mode === 'catchup') reconnect('The stream stalled');
+    }, P.mode === 'live' ? 20000 : 30000);
+  }
+  if (d.state !== 'buffering') clearTimeout(P.stallTimer);
   if (d.state === 'ready') {
-    status && (status.className = 'pstatus'); P.retried = false;
+    status && (status.className = 'pstatus'); P.retried = false; P.liveRetries = 0;
     if (P.mode === 'vod' && !P.subsTried) {
       P.subsTried = true;
       const it = P.item;
       setTimeout(() => { if (P.item === it) autoSubs(subItem(it), (m) => toast(m)); }, 1200);
     }
   }
-  if (d.state === 'ended' && P.mode === 'vod') {
-    saveProgress(P.resumeKey, { pos: P.dur, dur: P.dur });
+  if (d.state === 'ended' && (P.mode === 'vod' || P.mode === 'catchup')) {
+    // IPTV servers often just close the connection mid-film; the player reports that as "ended".
+    // Only treat it as the real end when we're within the last 2 minutes of a known length.
+    const realEnd = P.dur > 0 && P.dur - P.pos < 120000;
+    if (!realEnd) { reconnect('The connection dropped'); return; }
+    if (P.mode === 'catchup') { exit(); return; }
+    saveProgress(P.resumeKey, { ...P.item, pos: P.dur, dur: P.dur });
     subsBox().innerHTML = '';
     if (P.queue.length && setting('nextEpisode')) nextCountdown(); else exit();
   }
   if (d.state === 'error') {
-    if (!P.retried && P.mode) { P.retried = true; restart(); return; }
+    if (P.mode === 'vod' || P.mode === 'catchup') { reconnect(d.msg); return; }
+    if (P.mode === 'live' && (P.liveRetries || 0) < 3) {
+      P.liveRetries = (P.liveRetries || 0) + 1;
+      if (status) { status.className = 'pstatus show'; status.innerHTML = '<i class="spinner"></i>'; }
+      clearTimeout(P.retryTimer); P.retryTimer = setTimeout(() => { if (P.mode === 'live') restart(); }, 1500 * P.liveRetries);
+      return;
+    }
     if (status) { status.className = 'pstatus show err'; status.textContent = d.msg || 'This stream didn’t start. Try another channel or check your connection.'; }
     const pv = document.querySelector('.preview-msg'); if (pv) { pv.hidden = false; pv.textContent = 'Preview unavailable'; }
   }
@@ -66,6 +90,39 @@ function subsBox() {
   return b;
 }
 const subItem = (it) => ({ title: it.seriesName || it.title, year: it.year, season: it.season, episode: it.episode, url: it.url });
+
+// Films and catch-up: pick up again at the same point after a drop, a few times by itself,
+// then ask (Resume / Start from the beginning / Exit). The resume point is never thrown away.
+function reconnect(msg) {
+  if (!P.mode || P.mode === 'live') return;
+  const at = P.pos || 0;
+  if (P.mode === 'vod' && P.resumeKey && at > 0) saveProgress(P.resumeKey, { ...P.item, pos: at, dur: P.dur });
+  P.drops = (P.drops || 0) + 1;
+  const status = $('#player-status');
+  if (P.drops <= 4) {
+    if (status) { status.className = 'pstatus show'; status.innerHTML = `<i class="spinner"></i><p>Reconnecting${at ? ` at ${duration(at / 1000)}` : ''}…</p>`; }
+    clearTimeout(P.retryTimer);
+    P.retryTimer = setTimeout(() => { if (P.mode === 'vod' || P.mode === 'catchup') restart(); }, [0, 800, 2000, 4000, 7000][P.drops]);
+    return;
+  }
+  if (status) status.className = 'pstatus';
+  askResume(at, msg);
+}
+async function askResume(at, msg) {
+  if (P.asking) return;
+  P.asking = true;
+  const v = await sheet({ title: `${msg || 'The stream stopped'}${at ? ` at ${duration(at / 1000)}` : ''}`, options: [
+    ...(at ? [{ label: `Resume from ${duration(at / 1000)}`, value: 'resume', icon: 'play' }] : []),
+    { label: 'Start from the beginning', value: 'start', icon: 'rewind' },
+    { label: 'Exit', value: 'exit', icon: 'back' },
+  ] });
+  P.asking = false;
+  if (!P.mode) return;
+  P.drops = 0;
+  if (v === 'resume') restart();
+  else if (v === 'start') { P.pos = 0; restart(); }
+  else exit();
+}
 
 function restart() {
   if (P.mode === 'live') startLive(P.ch, false);
@@ -142,7 +199,9 @@ export function playVod(item, resumeKey, onExit, queue) {
   subsBox().innerHTML = '';
   const prog = resumeKey && progressOf(resumeKey);
   P.pos = prog ? prog.pos : 0; P.dur = prog ? prog.dur : 0;
+  P.drops = 0; P.savedAt = P.pos;
   N.play(urlOr(item.url), { live: false, start: P.pos });
+  set('nowPlaying', { item, resumeKey });
   P.previewCh = null;
   paint(); showOsd();
 }
@@ -160,7 +219,8 @@ function enter(mode) {
 }
 
 export function exit() {
-  clearTimeout(P.nextTimer);
+  clearTimeout(P.nextTimer); clearTimeout(P.retryTimer); clearTimeout(P.stallTimer);
+  if (S.nowPlaying) set('nowPlaying', null);
   const sb = document.getElementById('subs'); if (sb) sb.innerHTML = '';
   if (P.speed !== 1) { P.speed = 1; N.setSpeed(1); }
   if (P.mode === 'vod' && P.resumeKey) saveProgress(P.resumeKey, { pos: P.pos, dur: P.dur, ...P.item });

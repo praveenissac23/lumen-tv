@@ -81,8 +81,8 @@ export function pushRecentLive(id) {
 
 // ---- resume points ----
 export function saveProgress(key, info) {
-  if (!info.dur) return;
-  const done = info.pos / info.dur > 0.94;
+  if (!key || !(info.pos >= 0)) return;
+  const done = info.dur > 0 && info.pos / info.dur > 0.94;
   if (done) state.watched[key] = true;
   if (done || info.pos < 30000) delete state.progress[key];
   else state.progress[key] = { ...state.progress[key], ...info, t: Date.now() };
@@ -92,7 +92,8 @@ export function progressOf(key) { return state.progress[key] || null; }
 export function continueList() {
   return Object.entries(state.progress)
     .map(([key, v]) => ({ key, ...v }))
-    .sort((a, b) => b.t - a.t)
+    .filter((v) => v.url || v.id)
+    .sort((a, b) => (b.t || 0) - (a.t || 0))
     .slice(0, 20);
 }
 

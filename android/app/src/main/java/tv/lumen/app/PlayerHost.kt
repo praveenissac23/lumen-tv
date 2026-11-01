@@ -29,6 +29,7 @@ import androidx.media3.datasource.DefaultHttpDataSource
 import androidx.media3.exoplayer.DefaultLoadControl
 import androidx.media3.exoplayer.ExoPlayer
 import androidx.media3.exoplayer.source.DefaultMediaSourceFactory
+import androidx.media3.exoplayer.upstream.DefaultLoadErrorHandlingPolicy
 import androidx.media3.extractor.DefaultExtractorsFactory
 import androidx.media3.extractor.ts.DefaultTsPayloadReaderFactory
 import org.json.JSONObject
@@ -75,7 +76,10 @@ class PlayerHost(
         }
     }
 
-    private fun build(): ExoPlayer {
+    private var builtForLive = true
+
+    private fun build(live: Boolean): ExoPlayer {
+        builtForLive = live
         val http = DefaultHttpDataSource.Factory()
             .setUserAgent(USER_AGENT)
             .setAllowCrossProtocolRedirects(true)
@@ -88,7 +92,7 @@ class PlayerHost(
                     DefaultTsPayloadReaderFactory.FLAG_DETECT_ACCESS_UNITS
             )
             .setConstantBitrateSeekingEnabled(true)
-        val load = DefaultLoadControl.Builder()
+        val load = if (live) DefaultLoadControl.Builder()
             .setBufferDurationsMs(
                 maxOf(bufferMs, 2500),       // min buffer
                 maxOf(bufferMs * 4, 30000),  // max buffer
@@ -97,9 +101,18 @@ class PlayerHost(
             )
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
+        else DefaultLoadControl.Builder()
+            // Films and episodes: read far ahead (up to 10 minutes / 160 MB) and keep the last
+            // 2 minutes, so skipping forward or back inside that window is instant.
+            .setBufferDurationsMs(60_000, 600_000, 2_500, 5_000)
+            .setTargetBufferBytes(160 * 1024 * 1024)
+            .setPrioritizeTimeOverSizeThresholds(false)
+            .setBackBuffer(120_000, true)
+            .build()
         val p = ExoPlayer.Builder(activity)
             .setLoadControl(load)
-            .setMediaSourceFactory(DefaultMediaSourceFactory(data, extractors))
+            .setMediaSourceFactory(DefaultMediaSourceFactory(data, extractors)
+                .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(if (live) 3 else 8)))
             .build()
         p.setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
@@ -157,7 +170,9 @@ class PlayerHost(
     }
 
     fun play(url: String, opts: JSONObject) {
-        val p = player ?: build().also { player = it }
+        val live = opts.optBoolean("live", true)
+        if (player != null && builtForLive != live) { player?.release(); player = null }   // films get the big buffer
+        val p = player ?: build(live).also { player = it }
         extSubs.clear()
         p.setPlaybackSpeed(1f)
         emit("cues", JSONObject().put("text", ""))

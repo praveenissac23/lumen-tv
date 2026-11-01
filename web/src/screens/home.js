@@ -42,10 +42,11 @@ export class HomeScreen {
     const rows = [];
     const favs = itemsIn('live', '__fav').slice(0, 20);
     const recent = S.recentLive.map((id) => C.byId.live.get(id)).filter((c) => c && !favs.includes(c)).slice(0, 20);
-    if (favs.length) rows.push({ key: 'fav', title: 'Favourite channels', kind: 'live', items: favs });
-    if (recent.length) rows.push({ key: 'recent', title: 'Recently watched', kind: 'live', items: recent });
+    // Films and episodes you started, most recent first, always the first row
     const cont = continueList();
-    if (cont.length) rows.push({ key: 'cont', title: 'Continue watching', kind: 'cont', items: cont });
+    if (cont.length) rows.push({ key: 'cont', title: 'Keep watching', kind: 'cont', items: cont });
+    if (favs.length) rows.push({ key: 'fav', title: 'Favourite channels', kind: 'live', items: favs });
+    if (recent.length) rows.push({ key: 'recent', title: 'Recently watched channels', kind: 'live', items: recent });
 
     // Your languages: the rows chosen for each one (Settings > Home and languages), newest first, unlimited
     for (const id of S.myLangs) {
@@ -111,8 +112,8 @@ export class HomeScreen {
     if (kind === 'cont') {
       return `<button class="f tile land-tile" data-k="cont" data-i="${i}">
         ${poster({ name: it.title, img: it.poster }, true)}
-        <span class="lt-cap"><b>${esc(it.title)}</b><small>${esc(it.sub || '')}${it.sub ? ' – ' : ''}${Math.max(1, Math.round((it.dur - it.pos) / 60000))} min left</small></span>
-        ${progressBar(it.pos / it.dur, 'over')}</button>`;
+        <span class="lt-cap"><b>${esc(it.title)}</b><small>${esc(it.sub || '')}${it.sub ? ' – ' : ''}${it.dur > 0 ? `${Math.max(1, Math.round((it.dur - it.pos) / 60000))} min left` : `Resume from ${Math.floor(it.pos / 60000)} min`}</small></span>
+        ${it.dur > 0 ? progressBar(it.pos / it.dur, 'over') : ''}</button>`;
     }
     if (kind === 'cu') {
       return `<button class="f tile cu-tile" data-k="cu" data-i="${i}">

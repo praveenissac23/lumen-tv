@@ -600,3 +600,4 @@ body.lite .toast { box-shadow: none; }
 .row-hint { display: inline-flex; align-items: center; gap: 8px; margin-left: 20px; padding: 4px 14px; border-radius: 16px; background: rgba(207, 169, 104, .16); color: var(--brass); font-size: 20px; font-weight: 600; vertical-align: 4px; }
 .row-hint[hidden] { display: none; }
 .row-hint .ic { font-size: 20px; }
+.pstatus p { margin-top: 18px; font-size: 26px; color: var(--text-2); }
