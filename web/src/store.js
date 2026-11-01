@@ -42,6 +42,7 @@ const DEFAULTS = {
     homeLangRows: 'films,live', // which rows each language gets
     uiSize: 'm',           // s | m | l  screen size adjustment
     lite: true,            // lighter animations for TV sticks
+    catalogueRefresh: 1,   // days between automatic channel/film updates (0 = only when you press Refresh)
     homeLayout: 'rows',    // rows | hero | shortcuts | spotlight | compact
   },
 };

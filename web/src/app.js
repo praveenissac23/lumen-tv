@@ -293,6 +293,21 @@ N.on('epg', (d) => {
   else if (d.state === 'error') toast('Couldn’t download the TV guide', 'err');
 });
 
+// Channels and films update automatically every N days (Settings > Playlists), on start and while the app is open.
+function catalogueDue() {
+  const days = +setting('catalogueRefresh');
+  return days > 0 && catalogueAge() > days * 86400000;
+}
+let refreshing = false;
+setInterval(() => {
+  const pl = S.playlists.find((p) => p.id === S.active);
+  if (!pl || refreshing || player.mode || !catalogueDue()) return;
+  refreshing = true;
+  refresh((part) => { if (part !== 'epg' && current && current.name === 'home' && !player.mode) reload(); })
+    .then(() => toast(`${pl.name} updated: ${C.live.length.toLocaleString()} channels, ${C.movie.length.toLocaleString()} films`))
+    .catch(() => {}).finally(() => { refreshing = false; });
+}, 30 * 60 * 1000);
+
 function boot() {
   const t0 = performance.now();
   document.body.classList.toggle('lite', !!setting('lite'));
@@ -306,7 +321,7 @@ function boot() {
   if (hasCache) start();
   else showLoading();
   const pl = S.playlists.find((p) => p.id === S.active);
-  if (pl && (!hasCache || catalogueAge() > 4 * 3600 * 1000)) {
+  if (pl && (!hasCache || catalogueDue())) {
     refresh((part) => {
       if (!current) { start(); return; }
       if (player.mode) return;

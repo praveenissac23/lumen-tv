@@ -60,6 +60,7 @@ export class SettingsScreen {
       ${this.row('Add M3U playlist link', icon('plus'), 'addm', '', 'Optional XMLTV guide link')}
       ${activePlaylist() ? `<h2>Current subscription</h2>
         ${this.row('Refresh channels and guide', icon('refresh'), 'refresh', '', C.updatedAt ? `Last updated ${new Date(C.updatedAt).toLocaleString()}` : '')}
+        ${this.row('Update channels and films automatically', { 0: 'Only when I press Refresh', 1: 'Every day', 2: 'Every 2 days', 3: 'Every 3 days', 7: 'Every 7 days' }[+setting('catalogueRefresh')] || 'Every day', 'pick', 'catalogueRefresh', 'New films and channels from your provider appear after an update')}
         ${info.status ? this.row('Account status', esc(info.status), 'noop') : ''}
         ${exp ? this.row('Expires', esc(exp), 'noop') : ''}
         ${info.maxConn ? this.row('Connections', `${esc(info.active ?? 0)} of ${esc(info.maxConn)} in use`, 'noop') : ''}` : ''}`;
@@ -321,6 +322,7 @@ export class SettingsScreen {
         menuKey: [['voice', 'Starts voice search'], ['options', 'Opens options']],
         epgOffsetHours: [-3, -2, -1, 0, 1, 2, 3].map((h) => [h, h === 0 ? 'No shift' : `${h > 0 ? '+' : ''}${h} h`]),
         startScreen: [['home', 'Home'], ['live', 'Live TV'], ['guide', 'TV guide']],
+        catalogueRefresh: [[1, 'Every day'], [2, 'Every 2 days'], [3, 'Every 3 days'], [7, 'Every 7 days'], [0, 'Only when I press Refresh']],
         homeLayout: [['rows', 'Just rows'], ['hero', 'Live preview on top'], ['shortcuts', 'Shortcut buttons'], ['spotlight', 'Big Continue card'], ['compact', 'Compact rows']],
         subSize: [['s', 'Small'], ['m', 'Medium'], ['l', 'Large']],
         uiSize: [['s', 'Smaller (if edges are cut off)'], ['m', 'Fit the TV'], ['l', 'Larger']],
