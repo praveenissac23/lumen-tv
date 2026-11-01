@@ -75,6 +75,27 @@ export function toggleFav(kind, id) {
 }
 
 // ---- recent channels ----
+// Home screen sections, in order. n = number of items (0 = all, rows keep loading as you scroll).
+export const HOME_SECTIONS = [
+  { id: 'cont', label: 'Continue watching', on: true, n: 5 },
+  { id: 'recentLive', label: 'Recently watched channels', on: true, n: 5 },
+  { id: 'recentVod', label: 'Recently watched films and series', on: false, n: 5 },
+  { id: 'favs', label: 'Favourite channels', on: true, n: 20 },
+  { id: 'langs', label: 'Your language rows', on: true, n: 0 },
+  { id: 'pins', label: 'Pinned categories', on: true, n: 0 },
+  { id: 'newFilms', label: 'Recently added films (all languages)', on: false, n: 0 },
+  { id: 'newSeries', label: 'Recently added series (all languages)', on: false, n: 0 },
+  { id: 'sport', label: 'Sport channels', on: false, n: 0 },
+];
+export function homeSections() {
+  const saved = Array.isArray(state.settings.homeRows) ? state.settings.homeRows : [];
+  const out = [];
+  for (const s of saved) { const d = HOME_SECTIONS.find((x) => x.id === s.id); if (d && !out.some((o) => o.id === s.id)) out.push({ ...d, ...s, label: d.label }); }
+  for (const d of HOME_SECTIONS) if (!out.some((o) => o.id === d.id)) out.push({ ...d });
+  return out;
+}
+export function setHomeSections(list) { state.settings.homeRows = list.map(({ id, on, n }) => ({ id, on, n })); save(); }
+
 export function pushRecentVod(e) {
   const key = e.seriesId ? 'series:' + e.seriesId : e.key;   // a series appears once, with its latest episode
   state.recentVod = [{ ...e, rkey: key, t: Date.now() }, ...(state.recentVod || []).filter((x) => (x.rkey || x.key) !== key)].slice(0, 30);

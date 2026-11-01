@@ -1,6 +1,6 @@
 // Home: master search bar, last-channel hero with live preview, content rows.
 import { C, nowNext, itemsIn, progs, needsPin } from '../data.js';
-import { S, continueList, isFav, setting, langRowsFor } from '../store.js';
+import { S, continueList, isFav, setting, langRowsFor, homeSections } from '../store.js';
 import { langById, langItems, newest } from '../languages.js';
 import { itemActions } from '../actions.js';
 import { update, installUpdate } from '../updates.js';
@@ -40,47 +40,64 @@ export class HomeScreen {
 
   rows() {
     const rows = [];
-    const favs = itemsIn('live', '__fav').slice(0, 20);
-    const recent = S.recentLive.map((id) => C.byId.live.get(id)).filter(Boolean);
-    // 1. Continue watching: films and episodes you stopped part-way, newest first
-    const cont = continueList().slice(0, 5);
-    if (cont.length) rows.push({ key: 'cont', title: 'Continue watching', kind: 'cont', items: cont });
-    // 2. Recently watched channels
-    const rch = recent.filter((c) => !needsPin('live', c.cat)).slice(0, 5);
-    if (rch.length) rows.push({ key: 'recent', title: 'Recently watched channels', kind: 'live', items: rch, more: { screen: 'live', cat: '__recent' } });
-    // 3. Recently watched films and series
-    const rv = (S.recentVod || []).slice(0, 5);
-    if (rv.length) rows.push({ key: 'rv', title: 'Recently watched films and series', kind: 'rv', items: rv });
-    if (favs.length) rows.push({ key: 'fav', title: 'Favourite channels', kind: 'live', items: favs, more: { screen: 'live', cat: '__fav' } });
-
-    // Your languages: the rows chosen for each one (Settings > Home and languages), newest first, unlimited
-    for (const id of S.myLangs) {
-      const lang = langById(id);
-      if (!lang) continue;
-      const parts = langRowsFor(id);
-      const ok = (kind) => (it) => !needsPin(kind, it.cat);
-      if (parts.includes('films')) {
-        const films = newestAll('lf-' + id, langItems('movie', id).filter(ok('movie')));
-        if (films.length) rows.push({ key: 'lf-' + id, title: `New ${lang.name} films`, kind: 'movie', items: films, more: { screen: 'movies', lang: id } });
-      }
-      if (parts.includes('live')) {
-        const ch = langItems('live', id).filter(ok('live'));
-        if (ch.length) rows.push({ key: 'll-' + id, title: `${lang.name} channels`, kind: 'live', items: ch, more: { screen: 'live', lang: id } });
-      }
-      if (parts.includes('series')) {
-        const se = newestAll('ls-' + id, langItems('series', id).filter(ok('series')));
-        if (se.length) rows.push({ key: 'ls-' + id, title: `${lang.name} series`, kind: 'series', items: se, more: { screen: 'series', lang: id } });
+    const cap = (list, n) => (n > 0 ? list.slice(0, n) : list);
+    const ok = (kind) => (it) => !needsPin(kind, it.cat);
+    for (const sec of homeSections()) {
+      if (!sec.on) continue;
+      const n = sec.n;
+      if (sec.id === 'cont') {
+        const cont = cap(continueList(), n || 20);
+        if (cont.length) rows.push({ key: 'cont', title: 'Continue watching', kind: 'cont', items: cont });
+      } else if (sec.id === 'recentLive') {
+        const rch = cap(S.recentLive.map((id) => C.byId.live.get(id)).filter((c) => c && !needsPin('live', c.cat)), n);
+        if (rch.length) rows.push({ key: 'recent', title: 'Recently watched channels', kind: 'live', items: rch, more: { screen: 'live', cat: '__recent' } });
+      } else if (sec.id === 'recentVod') {
+        const rv = cap(S.recentVod || [], n);
+        if (rv.length) rows.push({ key: 'rv', title: 'Recently watched films and series', kind: 'rv', items: rv });
+      } else if (sec.id === 'favs') {
+        const favs = cap(itemsIn('live', '__fav'), n);
+        if (favs.length) rows.push({ key: 'fav', title: 'Favourite channels', kind: 'live', items: favs, more: { screen: 'live', cat: '__fav' } });
+      } else if (sec.id === 'langs') {
+        // the rows chosen for each language (Settings > Home and languages), newest first
+        for (const id of S.myLangs) {
+          const lang = langById(id);
+          if (!lang) continue;
+          const parts = langRowsFor(id);
+          if (parts.includes('films')) {
+            const films = cap(newestAll('lf-' + id, langItems('movie', id).filter(ok('movie'))), n);
+            if (films.length) rows.push({ key: 'lf-' + id, title: `New ${lang.name} films`, kind: 'movie', items: films, more: { screen: 'movies', lang: id } });
+          }
+          if (parts.includes('live')) {
+            const ch = cap(langItems('live', id).filter(ok('live')), n);
+            if (ch.length) rows.push({ key: 'll-' + id, title: `${lang.name} channels`, kind: 'live', items: ch, more: { screen: 'live', lang: id } });
+          }
+          if (parts.includes('series')) {
+            const se = cap(newestAll('ls-' + id, langItems('series', id).filter(ok('series'))), n);
+            if (se.length) rows.push({ key: 'ls-' + id, title: `${lang.name} series`, kind: 'series', items: se, more: { screen: 'series', lang: id } });
+          }
+        }
+      } else if (sec.id === 'pins') {
+        for (const pin of S.pins) {
+          const cat = C.cats[pin.kind].find((c) => c.id === pin.cat);
+          if (!cat || needsPin(pin.kind, pin.cat)) continue;
+          const items = cap(pin.kind === 'live' ? itemsIn('live', pin.cat) : newestAll(`pin-${pin.kind}-${pin.cat}`, itemsIn(pin.kind, pin.cat)), n);
+          if (items.length) rows.push({ key: `pin-${pin.kind}-${pin.cat}`, title: pin.kind === 'live' ? cat.name : `New in ${cat.name}`, kind: pin.kind, items, pinned: true,
+            more: { screen: pin.kind === 'movie' ? 'movies' : pin.kind, cat: pin.cat } });
+        }
+      } else if (sec.id === 'newFilms') {
+        const m = cap(newestAll('movies', C.movie.filter(ok('movie'))), n);
+        if (m.length) rows.push({ key: 'movies', title: 'Recently added films', kind: 'movie', items: m, more: { screen: 'movies' } });
+      } else if (sec.id === 'newSeries') {
+        const m = cap(newestAll('series', C.series.filter(ok('series'))), n);
+        if (m.length) rows.push({ key: 'series', title: 'Recently added series', kind: 'series', items: m, more: { screen: 'series' } });
+      } else if (sec.id === 'sport') {
+        const sports = C.cats.live.find((c) => /sport/i.test(c.name));
+        if (sports && !needsPin('live', sports.id)) {
+          const on = cap(itemsIn('live', sports.id), n);
+          if (on.length) rows.push({ key: 'sport', title: 'Sport channels', kind: 'live', items: on, more: { screen: 'live', cat: sports.id } });
+        }
       }
     }
-    // Categories pinned with a long press
-    for (const pin of S.pins) {
-      const cat = C.cats[pin.kind].find((c) => c.id === pin.cat);
-      if (!cat || needsPin(pin.kind, pin.cat)) continue;
-      const items = pin.kind === 'live' ? itemsIn('live', pin.cat) : newestAll(`pin-${pin.kind}-${pin.cat}`, itemsIn(pin.kind, pin.cat));
-      if (items.length) rows.push({ key: `pin-${pin.kind}-${pin.cat}`, title: pin.kind === 'live' ? cat.name : `New in ${cat.name}`, kind: pin.kind, items, pinned: true,
-        more: { screen: pin.kind === 'movie' ? 'movies' : pin.kind, cat: pin.cat } });
-    }
-
     this.cuPool = [];
     return rows;
   }

@@ -1,7 +1,7 @@
 // Settings: playlists, parental control, categories, playback, voice and remote, guide.
 import { C, testXtream, refresh, refreshEpg, loadFromCache, clearEpgCache } from '../data.js';
 import { epgInfo } from '../epg.js';
-import { S, set, setting, upsertPlaylist, removePlaylist, setLocked, isLocked, setHidden, isHidden, activePlaylist, flush, toggleLang, moveLang, togglePin, langRowsFor, setLangRows } from '../store.js';
+import { S, set, setting, upsertPlaylist, removePlaylist, setLocked, isLocked, setHidden, isHidden, activePlaylist, flush, toggleLang, moveLang, togglePin, langRowsFor, setLangRows, homeSections, setHomeSections } from '../store.js';
 import { LANGS, langById, langItems } from '../languages.js';
 import { SUB_LANGS, langName } from '../subs.js';
 import { WALLPAPERS, ACCENTS, applyLook } from '../look.js';
@@ -13,7 +13,7 @@ import { icon, toast, sheet, form, pinPad } from '../ui.js';
 import * as N from '../native.js';
 
 const SECTIONS = [
-  ['playlists', 'Playlists', 'list'], ['langs', 'Home and languages', 'globe'], ['look', 'Wallpaper and colour', 'image'],
+  ['playlists', 'Playlists', 'list'], ['home', 'Home screen', 'home'], ['langs', 'Languages', 'globe'], ['look', 'Wallpaper and colour', 'image'],
   ['downloads', 'Downloads and players', 'download'], ['subs', 'Subtitles', 'subtitles'], ['phone', 'Phone remote', 'phone'],
   ['voice', 'Voice search', 'mic'], ['parental', 'Parental control', 'lock'], ['cats', 'Categories', 'eyeOff'],
   ['playback', 'Playback', 'play'], ['guide', 'TV guide', 'guide'], ['about', 'About', 'tv'],
@@ -94,6 +94,43 @@ export class SettingsScreen {
       ${this.row('Channel up and down', setting('zapKeys') === 'reversed' ? 'Up goes to next channel' : 'Up goes to previous channel', 'pick', 'zapKeys')}`;
   }
 
+  home() {
+    const secs = homeSections();
+    const cnt = (n) => (n > 0 ? `${n} items` : 'All, keeps loading');
+    return `<h1>Home screen</h1>
+      <p class="st-intro">Choose what the home screen shows, how many items each row has, and the order. Press OK on a row to change it.</p>
+      ${this.row('Style', { rows: 'Just rows', hero: 'Live preview on top', shortcuts: 'Shortcut buttons', spotlight: 'Big Continue card', compact: 'Compact rows' }[setting('homeLayout') || 'rows'], 'pick', 'homeLayout', 'What sits above the rows')}
+      <h2>Rows, in order</h2>
+      ${secs.map((sc, i) => this.row(`${i + 1}. ${sc.label}`, sc.on ? `<span class="pill on">${esc(cnt(sc.n))}</span>` : '<span class="pill">Hidden</span>', 'homerow', sc.id,
+        sc.id === 'langs' ? 'Which languages and which rows each gets: Settings > Languages' : sc.id === 'pins' ? 'Hold OK on a category in Live TV or Films to pin it' : '')).join('')}
+      ${this.row('Reset home screen', icon('refresh'), 'homereset', '', 'Back to the standard rows and order')}`;
+  }
+
+  // One home row: show or hide, how many items, move up or down.
+  async editHomeRow(id) {
+    let focusAt = 0;
+    for (;;) {
+      const secs = homeSections(), i = secs.findIndex((x) => x.id === id), sc = secs[i];
+      const counts = [5, 10, 20, 0];
+      const opts = [
+        { label: sc.on ? 'Shown on the home screen' : 'Hidden from the home screen', value: 'toggle', on: sc.on, icon: sc.on ? 'check' : 'eyeOff' },
+        ...counts.map((c) => ({ label: c ? `Show ${c} items` : 'Show all (keeps loading as you scroll)', value: 'n' + c, on: sc.n === c, icon: 'list' })),
+        ...(i > 0 ? [{ label: 'Move up', value: 'up', icon: 'chevron' }] : []),
+        ...(i < secs.length - 1 ? [{ label: 'Move down', value: 'down', icon: 'chevron' }] : []),
+      ];
+      const v = await sheet({ title: sc.label, options: opts, focusIndex: focusAt });
+      if (v == null) break;
+      focusAt = Math.max(0, opts.findIndex((o) => o.value === v));
+      if (v === 'toggle') sc.on = !sc.on;
+      else if (v[0] === 'n') { sc.n = +v.slice(1); sc.on = true; }
+      else if (v === 'up' || v === 'down') { const j = v === 'up' ? i - 1 : i + 1; [secs[i], secs[j]] = [secs[j], secs[i]]; }
+      setHomeSections(secs);
+    }
+    this.show('home');
+    const b = this.view.querySelector(`[data-act="homerow"][data-arg="${id}"]`) || this.view.querySelector('#st-body .f');
+    if (b) focus(b);
+  }
+
   langs() {
     const present = LANGS.map((l) => ({ ...l, films: langItems('movie', l.id).length, live: langItems('live', l.id).length, series: langItems('series', l.id).length }));
     const mine = S.myLangs.map((id) => present.find((l) => l.id === id)).filter(Boolean);
@@ -101,9 +138,8 @@ export class SettingsScreen {
     const count = (l) => [l.live && `${l.live} channels`, l.films && `${l.films} films`, l.series && `${l.series} series`].filter(Boolean).join(', ') || 'Nothing found in your playlist';
     const NAMES = { live: 'Channels', films: 'Films', series: 'Series' };
     const shows = (id) => { const r = langRowsFor(id); return ['live', 'films', 'series'].filter((k) => r.includes(k)).map((k) => NAMES[k]).join(' + ') || 'Nothing on home'; };
-    return `<h1>Home and languages</h1>
+    return `<h1>Languages</h1>
       <p class="st-intro">Each language you add gets its own rows on the home screen, newest first, as long as you keep scrolling. Press OK on a language to choose its rows or change the order. Hold OK on any category in Live TV or Films to pin it to the home screen too.</p>
-      ${this.row('Home screen style', { rows: 'Just rows', hero: 'Live preview on top', shortcuts: 'Shortcut buttons', spotlight: 'Big Continue card', compact: 'Compact rows' }[setting('homeLayout') || 'rows'], 'pick', 'homeLayout', 'Continue watching, recent channels and recent films come first in every style')}
       <h2>Your languages, in home screen order</h2>
       ${mine.map((l, i) => this.row(`${i + 1}. ${l.name}`, `<span class="pill">${esc(shows(l.id))}</span>`, 'langedit', l.id, count(l))).join('') || '<p class="st-intro">None yet. Add one below.</p>'}
       ${S.pins.length ? `<h2>Pinned to home</h2>${S.pins.map((p) => { const c = C.cats[p.kind].find((x) => x.id === p.cat); return c ? this.row(c.name, `<span class="pill">Remove</span>`, 'unpin', p.kind + ':' + p.cat, { live: 'Live TV', movie: 'Films', series: 'Series' }[p.kind]) : ''; }).join('')}` : ''}
@@ -212,6 +248,8 @@ export class SettingsScreen {
     if (a === 'lang') { toggleLang(arg); this.repaint(btn); return; }
     if (a === 'langadd') { toggleLang(arg); toast(`${langById(arg).name} added to your home screen`); this.show('langs'); focusFirst(this.view.querySelector('#st-body')); return; }
     if (a === 'langedit') { this.editLang(arg); return; }
+    if (a === 'homerow') { this.editHomeRow(arg); return; }
+    if (a === 'homereset') { setHomeSections([]); setting('homeLayout', 'rows'); toast('Home screen reset'); this.show('home'); focusFirst(this.view.querySelector('#st-body')); return; }
     if (a === 'defplayer') {
       const pls = N.installedApps().filter((x) => x.role === 'player');
       const cur = setting(arg) || 'lumen';
