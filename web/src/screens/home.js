@@ -155,7 +155,7 @@ export class HomeScreen {
           </div>
         </section>` : ''}
         ${this.rowData.map((r, ri) => `<section class="row row-${r.kind}" data-row="${ri}">
-          <h2>${esc(r.title)}${r.pinned ? icon('pin', 'pinmark') : ''}<small>${r.items.length > 12 ? r.items.length.toLocaleString() : ''}</small></h2>
+          <h2>${esc(r.title)}${r.pinned ? icon('pin', 'pinmark') : ''}<small>${r.items.length > 12 ? r.items.length.toLocaleString() : ''}</small><span class="row-hint" hidden>${icon('back')}Back: start of row, then menu</span></h2>
           <div class="row-clip" data-scroll="x" data-pad="72"><div class="row-track" data-group="row${ri}">
             ${r.items.slice(0, (r.shown = Math.min(r.items.length, CHUNK))).map((it, i) => this.tile(r.kind, it, i)).join('')}
             ${r.more ? `<button class="f tile more-tile ${r.kind === 'movie' || r.kind === 'series' ? 'tall' : ''}" data-k="more">${icon('chevron')}<span>See all</span></button>` : ''}
@@ -189,6 +189,10 @@ export class HomeScreen {
       if (rowEl && tile.dataset.k !== 'more') {
         const r = this.rowData[+rowEl.dataset.row];
         const idx = [...tile.parentElement.children].indexOf(tile);
+        // once you're a few tiles in, show how to get back
+        const hint = rowEl.querySelector('.row-hint');
+        if (hint) hint.hidden = idx < 5;
+        for (const h of v.querySelectorAll('.row-hint')) if (h !== hint) h.hidden = true;
         if (r && r.shown < r.items.length && idx >= r.shown - 8) {
           const from = r.shown, to = Math.min(r.items.length, from + CHUNK);
           r.shown = to;
@@ -246,7 +250,7 @@ export class HomeScreen {
     }
   }
 
-  onKey(k) {
+  onKey(k, e) {
     if (k !== 'hold' && k !== 'menu') return false;
     const t = document.activeElement && document.activeElement.closest('.tile');
     if (!t || t.dataset.k === 'more') return false;

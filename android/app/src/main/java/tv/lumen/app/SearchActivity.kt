@@ -78,19 +78,37 @@ class SearchActivity : Activity() {
 
     override fun onWindowFocusChanged(hasFocus: Boolean) {
         super.onWindowFocusChanged(hasFocus)
-        if (hasFocus && !done) {
+        if (hasFocus && !done && !opened) {
+            opened = true
+            // Bring up the Amazon keyboard: ask nicely, then insist, then "press OK" on the field
+            // the way the remote would (Fire OS versions differ in which of these they honour).
             showKeyboard()
-            edit.postDelayed({ if (!done) showKeyboard() }, 350)
+            for (ms in longArrayOf(150, 400, 800)) edit.postDelayed({ if (!done && !keyboardUp()) showKeyboard() }, ms)
+            edit.postDelayed({ if (!done) pressOk() }, 700)   // harmless if the keyboard is already up
         }
+    }
+
+    private var opened = false
+
+    private fun keyboardUp(): Boolean {
+        val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
+        return imm.isActive(edit) && imm.isAcceptingText && isImeShowing
+    }
+    private var isImeShowing = false
+
+    private fun pressOk() {
+        edit.requestFocus()
+        edit.onKeyDown(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent(KeyEvent.ACTION_DOWN, KeyEvent.KEYCODE_DPAD_CENTER))
+        edit.onKeyUp(KeyEvent.KEYCODE_DPAD_CENTER, KeyEvent(KeyEvent.ACTION_UP, KeyEvent.KEYCODE_DPAD_CENTER))
+        edit.performClick()
     }
 
     private fun showKeyboard() {
         edit.requestFocus()
         val imm = getSystemService(Context.INPUT_METHOD_SERVICE) as InputMethodManager
-        if (!imm.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT)) {
-            @Suppress("DEPRECATION")
-            imm.showSoftInput(edit, InputMethodManager.SHOW_FORCED)
-        }
+        @Suppress("DEPRECATION")
+        val ok = imm.showSoftInput(edit, InputMethodManager.SHOW_IMPLICIT) || imm.showSoftInput(edit, InputMethodManager.SHOW_FORCED)
+        if (ok) isImeShowing = true
     }
 
     // Back (keyboard already closed): search what's in the box, or cancel if it's empty.
@@ -99,7 +117,14 @@ class SearchActivity : Activity() {
             if (event.action == KeyEvent.ACTION_UP) finishWith(edit.text.toString())
             return true
         }
-        if (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER && event.action == KeyEvent.ACTION_UP) { showKeyboard(); return true }
+        if (event.keyCode == KeyEvent.KEYCODE_DPAD_CENTER) {
+            if (event.action == KeyEvent.ACTION_UP) { showKeyboard(); pressOk() }
+            return true
+        }
+        if (event.keyCode == KeyEvent.KEYCODE_ENTER || event.keyCode == KeyEvent.KEYCODE_NUMPAD_ENTER) {
+            if (event.action == KeyEvent.ACTION_UP) finishWith(edit.text.toString())
+            return true
+        }
         return super.dispatchKeyEvent(event)
     }
 

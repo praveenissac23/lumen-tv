@@ -8,6 +8,7 @@ import { search, suggestFrom, searchOnTv } from '../search.js';
 import { playLive, playCatchup } from '../player.js';
 import { itemActions } from '../actions.js';
 import { showKeyboard, textInput } from '../native.js';
+import * as N from '../native.js';
 
 const KEYS = 'abcdefghijklmnopqrstuvwxyz1234567890'.split('');
 
@@ -223,6 +224,13 @@ export class SearchScreen {
 
   focus() {
     if (window.__desktop && (this.params.type || this.params.ime)) { this.typeChar(''); return; }
+    // TV: opening Search brings up the Amazon keyboard straight away (type, or hold the mic and speak)
+    if (!this.q && !this.params.restore && !this.autoAsked && N.isNative && !window.__desktop) {
+      this.autoAsked = true;
+      focus(this.view.querySelector('#sr-dictate'));
+      this.dictate();
+      return;
+    }
     if (this.params.ime) { focus(this.view.querySelector('#sr-dictate')); return; }
     if (this.params.voice && this.view.querySelector('.sr-results .f')) { focus(this.view.querySelector('.sr-results .f')); return; }
     focus(this.view.querySelector('.key'));

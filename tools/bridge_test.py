@@ -134,6 +134,11 @@ with sync_playwright() as p:
     page.evaluate("document.querySelector('[data-a=play]').click()"); page.wait_for_timeout(400)
     oc = [c for c in page.evaluate('window.__calls') if c['name'] == 'openWith'][n0:]
     print('default player VLC for films ->', [c['args'][0] for c in oc], '| in-app player opened:', page.evaluate("document.body.classList.contains('playing')"))
+    page.evaluate("__app.go('home', {}, {root:true})"); page.wait_for_timeout(300)
+    n1 = len([c for c in page.evaluate('window.__calls') if c['name'] == 'textInput'])
+    page.evaluate("document.querySelector('#home-search').click()"); page.wait_for_timeout(600)
+    n2 = len([c for c in page.evaluate('window.__calls') if c['name'] == 'textInput'])
+    print('home search bar -> Amazon keyboard opened:', n2 > n1, '| query:', page.evaluate("document.querySelector('#sr-input').value"))
     print('page transparent on TV:', page.evaluate("getComputedStyle(document.body).backgroundColor"), page.evaluate("getComputedStyle(document.documentElement).backgroundColor"))
     # long-press menu -> external player, download path with HEAD, subtitles search
     page.evaluate("__app.go('home', {}, {root:true})"); page.wait_for_timeout(400)
