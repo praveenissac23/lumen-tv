@@ -50,6 +50,8 @@ export function initInput() {
       if (name === 'ok') { e.preventDefault(); dispatch('submit', e); return; }
     }
     e.preventDefault();
+    if (window.__desktop && ['up', 'down', 'left', 'right'].includes(name) && !document.querySelector('#overlays *') &&
+        !onScreen(document.activeElement) && recoverFocus()) return;
     if (name === 'ok' && !inInput) {
       if (e.repeat) return;
       okDown = performance.now(); okHeld = false;
@@ -67,18 +69,73 @@ export function initInput() {
   }, true);
   onNative('key', (d) => dispatch(d.name, null));
   // Pointer/touch support (phones, testing): click = ok on focusable
-  // Pointer: focus follows the mouse only when the mouse itself moves (not when content
-  // slides under a still pointer while scrolling), and never opens the side menu by hovering.
-  let mx = -1, my = -1;
-  document.addEventListener('mousemove', (e) => {
-    const moved = Math.abs(e.clientX - mx) + Math.abs(e.clientY - my) > 3;
-    mx = e.clientX; my = e.clientY;
-    if (!moved || (window.__lastWheel && Date.now() - window.__lastWheel < 400)) return;
+  if (window.__desktop) initDesktop();
+}
+
+// ---------- Mac / computer: real scrolling and pointer behaviour ----------
+// The TV interface moves focus with the remote. On a computer the trackpad scrolls the
+// content itself, hovering only highlights, and clicking selects.
+function scrollTrack(n, axis, d) {
+  const track = n.firstElementChild;
+  if (!track) return false;
+  const x = axis === 'x';
+  const view = x ? n.clientWidth : n.clientHeight;
+  const full = x ? Math.max(track.scrollWidth, track.offsetWidth) : Math.max(track.scrollHeight, track.offsetHeight);
+  const max = Math.max(0, full - view);
+  const cur = track._off || 0;
+  const next = Math.max(-max, Math.min(0, cur - d));
+  if (next === cur) return false;
+  track._off = next;
+  track.style.transition = 'none';
+  track.style.transform = x ? `translate3d(${next}px,0,0)` : `translate3d(0,${next}px,0)`;
+  clearTimeout(track._tt);
+  track._tt = setTimeout(() => { track.style.transition = ''; }, 180);
+  n.dispatchEvent(new CustomEvent('wheelscrolled', { bubbles: true, detail: { axis, off: next } }));
+  return true;
+}
+function initDesktop() {
+  document.addEventListener('wheel', (e) => {
+    window.__lastWheel = Date.now();
+    const k = e.deltaMode === 1 ? 33 : e.deltaMode === 2 ? 400 : 1;
+    const dx = e.deltaX * k, dy = e.deltaY * k;
+    const vertical = Math.abs(dy) >= Math.abs(dx);
+    const d = vertical ? dy : dx;
+    if (!d) return;
+    e.preventDefault();
+    if (document.querySelector('#overlays .sheet-wrap')) return;
+    for (let n = e.target; n && n !== document.body; n = n.parentElement) {
+      if (vertical && n._virt && n._virt.scrollPx(d)) return;
+      const axis = n.dataset && n.dataset.scroll;
+      if (axis === (vertical ? 'y' : 'x') && scrollTrack(n, axis, d)) return;
+    }
+  }, { passive: false, capture: true });
+  // click puts keyboard focus where you clicked (hover only highlights, see .desktop .f:hover)
+  document.addEventListener('mousedown', (e) => {
     const f = e.target.closest && e.target.closest('.f');
-    if (!f || f === document.activeElement || f.closest('[aria-hidden="true"]')) return;
-    if (f.closest('#rail') && !document.activeElement?.closest('#rail')) return;
-    focus(f, { noScroll: true });
-  });
+    window.__pointerFocus = Date.now();
+    if (f && f !== document.activeElement) focus(f, { noScroll: true });
+  }, true);
+}
+
+// Arrow keys after scrolling with the trackpad: start from what's on screen, not from an item scrolled away.
+function onScreen(elm) {
+  if (!elm || !elm.isConnected || elm === document.body) return false;
+  const r = elm.getBoundingClientRect();
+  return r.width > 0 && r.bottom > 0 && r.right > 0 && r.top < innerHeight && r.left < innerWidth;
+}
+function recoverFocus() {
+  const view = document.getElementById('view');
+  if (!view) return false;
+  const cx = innerWidth / 2, cy = innerHeight / 2;
+  let best = null, bd = Infinity;
+  for (const el of view.querySelectorAll('.f')) {
+    const r = el.getBoundingClientRect();
+    if (!r.width || r.bottom < 0 || r.top > innerHeight || r.right < 0 || r.left > innerWidth) continue;
+    const dd = Math.hypot(r.left + r.width / 2 - cx, r.top + r.height / 2 - cy);
+    if (dd < bd) { bd = dd; best = el; }
+  }
+  if (best) { focus(best, { noScroll: true }); return true; }
+  return false;
 }
 
 export function sendKey(name) { return dispatch(name, null); }

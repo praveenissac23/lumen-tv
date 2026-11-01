@@ -605,3 +605,8 @@ body.lite .toast { box-shadow: none; }
 .upd-log li { margin: 3px 0; }
 .upd-perm { margin: 12px 0; padding: 14px 18px; border-radius: 12px; background: rgba(207,169,104,.12); font-size: 22px; line-height: 1.4; }
 .update-sheet .form-actions { flex-wrap: wrap; row-gap: 14px; }
+
+/* Mac / computer: hover highlights (focus stays with the keyboard), pointer cursor */
+.desktop .f { cursor: pointer; }
+.desktop .f:hover:not(:focus) { box-shadow: 0 0 0 3px rgba(207, 169, 104, .55); }
+.desktop .rail-item:hover:not(:focus), .desktop .cat-row:hover:not(:focus), .desktop .ch-row:hover:not(:focus), .desktop .st-row:hover:not(:focus), .desktop .st-sec:hover:not(:focus) { box-shadow: none; background: rgba(236, 231, 221, .07); }

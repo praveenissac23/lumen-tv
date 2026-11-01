@@ -133,7 +133,7 @@ export class HomeScreen {
     const hour = new Date().getHours();
     const greet = hour < 5 ? 'Good night' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
     this.view.innerHTML = `
-      <div class="home-scroll"><div class="home-track">
+      <div class="home-scroll" data-scroll="y"><div class="home-track">
         <header class="topbar">
           <div class="searchbar" data-group="top">
             <button class="f search-field" id="home-search">${icon('search')}<span>Search channels, films, series and what’s on</span></button>
@@ -194,15 +194,10 @@ export class HomeScreen {
         const hint = rowEl.querySelector('.row-hint');
         if (hint) hint.hidden = idx < 5;
         for (const h of v.querySelectorAll('.row-hint')) if (h !== hint) h.hidden = true;
-        if (r && r.shown < r.items.length && idx >= r.shown - 8) {
-          const from = r.shown, to = Math.min(r.items.length, from + CHUNK);
-          r.shown = to;
-          const html = r.items.slice(from, to).map((it, k) => this.tile(r.kind, it, from + k)).join('');
-          const more = tile.parentElement.querySelector('.more-tile');
-          if (more) more.insertAdjacentHTML('beforebegin', html); else tile.parentElement.insertAdjacentHTML('beforeend', html);
-          patchNowSlots(rowEl);
-        }
+        if (r && r.shown < r.items.length && idx >= r.shown - 8) this.growRow(rowEl);
       }
+      // clicking with the mouse shouldn't move the page
+      if (window.__pointerFocus && Date.now() - window.__pointerFocus < 400) return;
       // focusing the hero region keeps the page at the top; rows scroll the page
       const inHero = e.target.closest('.hero, .topbar');
       const scroller = v.querySelector('.home-scroll');
@@ -220,8 +215,33 @@ export class HomeScreen {
         }
       }
     });
+    // Trackpad (Mac): rows keep loading while you scroll them; the hero preview pauses when scrolled away
+    v.addEventListener('wheelscrolled', (e) => {
+      if (e.detail.axis === 'x') {
+        const rowEl = e.target.closest('[data-row]');
+        const track = e.target.firstElementChild;
+        if (rowEl && track && -e.detail.off + e.target.clientWidth > track.scrollWidth - 900) this.growRow(rowEl);
+        return;
+      }
+      clearTimeout(this.previewTimer);
+      if (e.detail.off < -200) stopPreview();
+      else this.previewTimer = setTimeout(() => { const tr = v.querySelector('.home-track'); if (!tr._off || tr._off > -200) this.startPreview(); }, 400);
+    });
     // live preview in the hero
     this.previewTimer = setTimeout(() => this.startPreview(), 500);
+  }
+
+  // Add the next tiles to an endless row.
+  growRow(rowEl) {
+    const r = this.rowData[+rowEl.dataset.row];
+    if (!r || r.shown >= r.items.length) return;
+    const track = rowEl.querySelector('.row-track');
+    const from = r.shown, to = Math.min(r.items.length, from + CHUNK);
+    r.shown = to;
+    const html = r.items.slice(from, to).map((it, k) => this.tile(r.kind, it, from + k)).join('');
+    const more = track.querySelector('.more-tile');
+    if (more) more.insertAdjacentHTML('beforebegin', html); else track.insertAdjacentHTML('beforeend', html);
+    patchNowSlots(rowEl);
   }
 
   startPreview() {

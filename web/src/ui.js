@@ -203,6 +203,7 @@ export function form({ title, fields, submit = 'Save', note = '' }) {
 export class VList {
   constructor(host, { rowH, render, onFocus, onSelect, overscan = 3, group }) {
     Object.assign(this, { host, rowH, render, onFocus, onSelect, overscan });
+    host._virt = this;
     host.classList.add('vlist');
     if (group) host.dataset.group = group;
     host.innerHTML = '<div class="vtrack"></div>';
@@ -225,7 +226,22 @@ export class VList {
     this.ensure(true);
   }
   get rowsVisible() { return Math.min(Math.ceil(1080 / this.rowH) + 1, Math.ceil(this.host.offsetHeight / this.rowH) + 1); }
+  // Trackpad / mouse wheel (Mac): move the list by pixels without moving focus.
+  scrollPx(d) {
+    const max = Math.max(0, this.items.length * this.rowH - this.host.offsetHeight);
+    const cur = this.wheel ? this.px : Math.max(0, this.top) * this.rowH;
+    const px = Math.max(0, Math.min(max, cur + d));
+    if (px === cur) return false;
+    this.wheel = true; this.px = px;
+    this.track.style.transition = 'none';
+    this.track.style.transform = `translate3d(0,${-px}px,0)`;
+    const top = Math.floor(px / this.rowH);
+    if (top !== this.top) { this.top = top; this.paint(); }
+    return true;
+  }
   ensure(force) {
+    if (this.wheel && !force) return;
+    if (this.wheel) { this.wheel = false; this.track.style.transition = ''; }
     const vis = Math.max(1, Math.min(Math.floor(1080 / this.rowH), Math.floor(this.host.offsetHeight / this.rowH))); // fully visible rows
     let top = this.top < 0 ? 0 : this.top;
     if (this.index < top + 1) top = this.index - 1;
@@ -256,6 +272,7 @@ export class VList {
   // returns true if handled
   key(k) {
     if (!this.has(document.activeElement)) return false;
+    if (this.wheel) { this.wheel = false; this.track.style.transition = ''; }
     if (k === 'up') { if (this.index === 0) return false; this.focusIndex(this.index - 1); return true; }
     if (k === 'down') { if (this.index >= this.items.length - 1) return true; this.focusIndex(this.index + 1); return true; }
     if (k === 'chup' || k === 'pgup') { this.focusIndex(this.index - this.rowsVisible + 3); return true; }
@@ -269,6 +286,7 @@ export class VList {
 export class VGrid {
   constructor(host, { cols, cellH, render, onSelect, onFocus, group }) {
     Object.assign(this, { host, cols, cellH, render, onSelect, onFocus });
+    host._virt = this;
     host.classList.add('vgrid');
     if (group) host.dataset.group = group;
     host.innerHTML = '<div class="vtrack"></div>';
@@ -289,7 +307,22 @@ export class VGrid {
     this.topRow = -1; this.ensure(true);
   }
   get rowsVisible() { return Math.min(Math.ceil(1080 / this.cellH) + 1, Math.ceil(this.host.offsetHeight / this.cellH)); }
+  scrollPx(d) {
+    const rows = Math.ceil(this.items.length / this.cols);
+    const max = Math.max(0, rows * this.cellH - this.host.offsetHeight);
+    const cur = this.wheel ? this.px : Math.max(0, this.topRow) * this.cellH;
+    const px = Math.max(0, Math.min(max, cur + d));
+    if (px === cur) return false;
+    this.wheel = true; this.px = px;
+    this.track.style.transition = 'none';
+    this.track.style.transform = `translate3d(0,${-px}px,0)`;
+    const top = Math.floor(px / this.cellH);
+    if (top !== this.topRow) { this.topRow = top; this.paint(); }
+    return true;
+  }
   ensure(force) {
+    if (this.wheel && !force) return;
+    if (this.wheel) { this.wheel = false; this.track.style.transition = ''; }
     const row = Math.floor(this.index / this.cols);
     const vis = Math.max(1, Math.min(Math.floor(1080 / this.cellH), Math.floor(this.host.offsetHeight / this.cellH)));
     let top = this.topRow < 0 ? 0 : this.topRow;
@@ -323,6 +356,7 @@ export class VGrid {
   has(elm) { return this.track.contains(elm); }
   key(k) {
     if (!this.has(document.activeElement)) return false;
+    if (this.wheel) { this.wheel = false; this.track.style.transition = ''; }
     const c = this.index % this.cols;
     if (k === 'left') { if (c === 0) return false; this.focusIndex(this.index - 1); return true; }
     if (k === 'right') { if (c === this.cols - 1 || this.index === this.items.length - 1) return true; this.focusIndex(this.index + 1); return true; }
