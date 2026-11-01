@@ -88,6 +88,7 @@ class Updater(private val act: MainActivity) {
         // Android 8+: the app needs "Install unknown apps" permission once.
         if (Build.VERSION.SDK_INT >= 26 && !act.packageManager.canRequestPackageInstalls()) {
             pendingApk = apk
+            askedAt = System.currentTimeMillis()
             emit("update", JSONObject().put("state", "permission"))
             val opened = tryStart(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES, Uri.parse("package:${act.packageName}")))
                 || tryStart(Intent(Settings.ACTION_MANAGE_UNKNOWN_APP_SOURCES))
@@ -134,9 +135,14 @@ class Updater(private val act: MainActivity) {
 
     // After the person allows "Install unknown apps", returning to the app continues the install.
     private var pendingApk: File? = null
+    private var askedAt = 0L
     fun onResume(emit: (String, JSONObject) -> Unit) {
         val apk = pendingApk ?: return
-        if (Build.VERSION.SDK_INT >= 26 && !act.packageManager.canRequestPackageInstalls()) return
+        if (Build.VERSION.SDK_INT >= 26 && !act.packageManager.canRequestPackageInstalls()) {
+            // Some Fire TVs open and immediately close that settings page: show the manual steps instead.
+            if (System.currentTimeMillis() - askedAt < 4000) emit("update", JSONObject().put("state", "permission-manual"))
+            return
+        }
         pendingApk = null
         emit("update", JSONObject().put("state", "installing"))
         openInstaller(apk, emit)

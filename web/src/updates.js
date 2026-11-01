@@ -85,6 +85,11 @@ N.on('update', (d) => {
   if (d.state === 'downloading') { if (bar) bar.style.width = d.pct + '%'; if (pct) pct.textContent = `Downloading ${d.pct}%`; }
   if (d.state === 'installing' && pct) pct.textContent = isMac() ? 'Installing. Lumen TV will restart in a moment.' : 'Choose Install (or Update) on the next screen. Lumen TV reopens by itself when it’s done.';
   if (d.state === 'permission' && pct) pct.textContent = 'One time only: switch Lumen TV on (Allow / Install unknown apps), then press Back. The update continues by itself.';
-  if (d.state === 'permission-manual' && pct) pct.textContent = 'One time only: on the TV open Settings > My Fire TV > Developer options > Install unknown apps, switch Lumen TV on, then come back and press Install update again.';
+  if (d.state === 'permission-manual') {
+    const msg = 'One time only: press Home, open Settings > My Fire TV > Developer options > Install unknown apps, switch Lumen TV on, then come back. The update installs by itself.';
+    if (pct) pct.textContent = msg;
+    const b = document.querySelector('.update-sheet [data-a=go]'); if (b) b.disabled = false;
+    toast(msg, 'err');
+  }
   if (d.state === 'error') { if (pct) pct.textContent = `Update failed: ${d.msg}`; toast(`Update failed: ${d.msg}`, 'err'); }
 });
