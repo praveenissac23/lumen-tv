@@ -67,9 +67,17 @@ export function initInput() {
   }, true);
   onNative('key', (d) => dispatch(d.name, null));
   // Pointer/touch support (phones, testing): click = ok on focusable
-  document.addEventListener('mouseover', (e) => {
+  // Pointer: focus follows the mouse only when the mouse itself moves (not when content
+  // slides under a still pointer while scrolling), and never opens the side menu by hovering.
+  let mx = -1, my = -1;
+  document.addEventListener('mousemove', (e) => {
+    const moved = Math.abs(e.clientX - mx) + Math.abs(e.clientY - my) > 3;
+    mx = e.clientX; my = e.clientY;
+    if (!moved || (window.__lastWheel && Date.now() - window.__lastWheel < 400)) return;
     const f = e.target.closest && e.target.closest('.f');
-    if (f && f !== document.activeElement && !f.closest('[aria-hidden="true"]')) focus(f, { noScroll: true });
+    if (!f || f === document.activeElement || f.closest('[aria-hidden="true"]')) return;
+    if (f.closest('#rail') && !document.activeElement?.closest('#rail')) return;
+    focus(f, { noScroll: true });
   });
 }
 
