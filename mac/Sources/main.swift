@@ -129,7 +129,9 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
         decisionHandler(.cancel)
     }
 
-    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { webView.reload() }
+    /// Set when the interface had to restart, so it continues what was playing instead of starting over.
+    var recovered = false
+    func webViewWebContentProcessDidTerminate(_ webView: WKWebView) { recovered = true; webView.reload() }
 
     // ---------- menus ----------
     private func buildMenu() {

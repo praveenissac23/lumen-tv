@@ -36,7 +36,8 @@ final class Bridge {
         // ---------- device ----------
         case "deviceInfo":
             let size = App.viewSize
-            return json(["fireTv": false, "voice": false, "desktop": true, "platform": "mac",
+            let rec = main { App.shared.recovered }
+            return json(["fireTv": false, "voice": false, "desktop": true, "platform": "mac", "recovered": rec,
                          "model": "Mac", "version": App.version, "versionCode": App.build,
                          "cssW": size.width, "cssH": size.height])
         case "viewSize":
@@ -125,7 +126,7 @@ final class Bridge {
         case "play":
             let url = s(0)
             let opts = (try? JSONSerialization.jsonObject(with: Data(s(1).utf8))) as? [String: Any] ?? [:]
-            ui { App.shared.player?.play(url, opts: opts) }
+            ui { App.shared.recovered = false; App.shared.player?.play(url, opts: opts) }
             return nil
         case "stop": ui { App.shared.player?.stop() }; return nil
         case "pause": ui { App.shared.player?.pause(true) }; return nil
