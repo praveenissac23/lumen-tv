@@ -22,17 +22,32 @@ class Updater(private val act: MainActivity) {
 
     @Volatile private var busy = false
 
-    fun install(url: String, emit: (String, JSONObject) -> Unit) {
+    /** Whether Android will let this app install updates (Fire TV: Developer options > Install unknown apps). */
+    fun canInstall(): Boolean = Build.VERSION.SDK_INT < 26 || act.packageManager.canRequestPackageInstalls()
+
+    private fun log(emit: (String, JSONObject) -> Unit, text: String) = emit("update", JSONObject().put("state", "log").put("text", text))
+
+    /** mode: "auto" (Android's installer), "amazon" (system install screen), "downloader" (hand the link to the Downloader app). */
+    fun install(url: String, mode: String, emit: (String, JSONObject) -> Unit) {
+        report = emit
+        if (mode == "downloader") {
+            val ok = tryStart(Intent(Intent.ACTION_VIEW, Uri.parse(url)).setPackage(DOWNLOADER))
+            log(emit, if (ok) "Opened Downloader with the update link" else "Downloader isn’t installed on this TV")
+            if (!ok) emit("update", JSONObject().put("state", "error").put("msg", "Downloader isn’t installed. Install it from the Amazon Appstore, or turn on Install unknown apps for Lumen TV."))
+            return
+        }
         if (busy) return
         busy = true
+        log(emit, "Permission to install updates: " + (if (canInstall()) "on" else "off"))
         Thread {
             try {
                 val dir = File(act.cacheDir, "updates").apply { mkdirs() }
                 dir.listFiles()?.forEach { it.delete() }
                 val apk = File(dir, "lumen-tv.apk")
                 download(url, apk) { pct -> emit("update", JSONObject().put("state", "downloading").put("pct", pct)) }
+                log(emit, "Downloaded ${apk.length() / 1024} KB")
                 emit("update", JSONObject().put("state", "installing"))
-                act.runOnUiThread { openInstaller(apk, emit) }
+                act.runOnUiThread { if (mode == "amazon") openSystemInstaller(apk, emit) else openInstaller(apk, emit) }
             } catch (e: Exception) {
                 emit("update", JSONObject().put("state", "error").put("msg", e.message ?: "Download failed"))
             } finally {
@@ -98,7 +113,9 @@ class Updater(private val act: MainActivity) {
         }
         try {
             installWithSession(apk)
+            log(emit, "Handed to Android’s installer")
         } catch (e: Exception) {
+            log(emit, "Android’s installer refused (${e.message}); trying the install screen")
             // Older installers: hand the file to the system's package installer screen.
             val uri = if (Build.VERSION.SDK_INT >= 24) FileProvider.getUriForFile(act, "${act.packageName}.files", apk) else Uri.fromFile(apk)
             @Suppress("DEPRECATION")
@@ -129,6 +146,18 @@ class Updater(private val act: MainActivity) {
         }
     }
 
+    /** The system "Install / Cancel" screen for the downloaded file. */
+    private fun openSystemInstaller(apk: File, emit: (String, JSONObject) -> Unit) {
+        val uri = if (Build.VERSION.SDK_INT >= 24) FileProvider.getUriForFile(act, "${act.packageName}.files", apk) else Uri.fromFile(apk)
+        @Suppress("DEPRECATION")
+        val ok = tryStart(Intent(Intent.ACTION_INSTALL_PACKAGE).setData(uri).addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+            .putExtra(Intent.EXTRA_NOT_UNKNOWN_SOURCE, true).putExtra(Intent.EXTRA_RETURN_RESULT, false))
+            || tryStart(Intent(Intent.ACTION_VIEW).setDataAndType(uri, "application/vnd.android.package-archive").addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION))
+        log(emit, if (ok) "Opened the install screen" else "The install screen couldn’t be opened")
+        installScreenAt = System.currentTimeMillis()
+    }
+    private var installScreenAt = 0L
+
     private fun tryStart(i: Intent): Boolean = try {
         act.startActivity(i.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)); true
     } catch (e: Exception) { false }
@@ -137,6 +166,16 @@ class Updater(private val act: MainActivity) {
     private var pendingApk: File? = null
     private var askedAt = 0L
     fun onResume(emit: (String, JSONObject) -> Unit) {
+        if (confirmAt > 0 && System.currentTimeMillis() - confirmAt < 4000) {
+            confirmAt = 0
+            log(emit, "The confirm screen closed straight away")
+            emit("update", JSONObject().put("state", "error").put("msg", "The TV closed the confirm screen. Try the other options below."))
+        }
+        if (installScreenAt > 0 && System.currentTimeMillis() - installScreenAt < 4000) {
+            installScreenAt = 0
+            log(emit, "The install screen closed straight away")
+            emit("update", JSONObject().put("state", "error").put("msg", "The TV closed the install screen. Use the Downloader option below."))
+        }
         val apk = pendingApk ?: return
         if (Build.VERSION.SDK_INT >= 26 && !act.packageManager.canRequestPackageInstalls()) {
             // Some Fire TVs open and immediately close that settings page: show the manual steps instead.
@@ -149,8 +188,10 @@ class Updater(private val act: MainActivity) {
     }
 
     companion object {
+        const val DOWNLOADER = "com.esaba.downloader"
         /** Where install results go (set while an update is running). */
         @Volatile var report: ((String, JSONObject) -> Unit)? = null
+        @Volatile var confirmAt = 0L
     }
 }
 
@@ -161,6 +202,8 @@ class InstallReceiver : BroadcastReceiver() {
             PackageInstaller.STATUS_PENDING_USER_ACTION -> {
                 @Suppress("DEPRECATION")
                 val confirm = intent.getParcelableExtra<Intent>(Intent.EXTRA_INTENT) ?: return
+                Updater.report?.invoke("update", JSONObject().put("state", "log").put("text", "Asking you to confirm the install"))
+                Updater.confirmAt = System.currentTimeMillis()
                 try { ctx.startActivity(confirm.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) } catch (e: Exception) {
                     Updater.report?.invoke("update", JSONObject().put("state", "error").put("msg", "Android’s installer couldn’t be opened"))
                 }

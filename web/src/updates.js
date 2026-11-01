@@ -52,44 +52,76 @@ export function startUpdateChecks() {
   document.addEventListener('visibilitychange', () => { if (!document.hidden && Date.now() - update.checkedAt > 10 * 60 * 1000) checkForUpdate(); });
 }
 
-// Full-screen confirmation with download progress.
+// Full-screen update sheet: permission check first (Fire TV), progress, a step-by-step log,
+// and other ways to install if the TV refuses the first one.
+const PERM_STEPS = 'Press Home, open Settings > My Fire TV > Developer options > Install unknown apps, and switch Lumen TV on. (No Developer options? Settings > My Fire TV > About: select your Fire TV’s name 7 times.)';
 export function installUpdate() {
   const u = update.available;
   if (!u) return;
+  const mac = isMac();
   const root = el(`<div class="sheet-wrap center" data-trap><div class="sheet update-sheet">
     <div class="pin-head">${icon('download')}<div><h2>Update to build ${u.build}</h2><p>You have build ${currentBuild()}. Your settings and favourites stay.</p></div></div>
     ${u.notes ? `<p class="update-notes">${esc(u.notes)}</p>` : ''}
+    <div class="upd-perm" hidden><p><b>One-time step:</b> ${esc(PERM_STEPS)}</p></div>
     <div class="update-progress" hidden><span class="bar"><i style="width:0%"></i></span><small id="upd-pct">Starting download</small></div>
-    <div class="form-actions"><button class="f btn primary" data-a="go">${icon('download')}Install update</button><button class="f btn" data-a="later">Later</button></div>
+    <ol class="upd-log" hidden></ol>
+    <div class="form-actions" data-group="updbtns">
+      <button class="f btn primary" data-a="go">${icon('download')}Install update</button>
+      <button class="f btn" data-a="recheck" hidden>${icon('refresh')}I’ve switched it on</button>
+      <button class="f btn" data-a="amazon" hidden>Amazon installer</button>
+      <button class="f btn" data-a="downloader" hidden>Downloader app</button>
+      <button class="f btn" data-a="later">Later</button></div>
   </div></div>`);
   document.getElementById('overlays').appendChild(root);
-  const close = () => { popLayer(layer); root.remove(); N.on('update', () => {}); };
+  const q = (s2) => root.querySelector(s2);
+  const close = () => { popLayer(layer); root.remove(); };
   const layer = { root, modal: true, onKey: (k) => { if (k === 'back') { close(); return true; } return false; } };
-  const prog = root.querySelector('.update-progress');
+  const showOthers = () => {
+    if (mac) return;
+    q('[data-a=amazon]').hidden = false;
+    if (N.device().downloader) q('[data-a=downloader]').hidden = false;
+  };
+  const permOk = () => mac || N.device().canInstall !== false;
+  const needPerm = () => {
+    q('.upd-perm').hidden = false; q('[data-a=recheck]').hidden = false; q('[data-a=go]').hidden = true;
+    showOthers();
+    focus(q('[data-a=recheck]'));
+  };
+  const start = (mode) => {
+    q('.update-progress').hidden = false; q('.upd-log').hidden = false;
+    q('[data-a=go]').hidden = true; q('[data-a=recheck]').hidden = true; q('.upd-perm').hidden = true;
+    focus(q('[data-a=later]'));
+    N.installUpdateWith(u.url, mode);
+  };
   root.addEventListener('click', (e) => {
     const b = e.target.closest('[data-a]');
     if (!b) return;
-    if (b.dataset.a === 'later') return close();
-    prog.hidden = false;
-    b.disabled = true;
-    N.installUpdate(u.url);
+    const a = b.dataset.a;
+    if (a === 'later') return close();
+    if (a === 'go' || a === 'recheck') { if (!permOk()) { needPerm(); if (a === 'recheck') toast('Lumen TV still isn’t allowed to install apps', 'err'); return; } start('auto'); }
+    if (a === 'amazon') start('amazon');
+    if (a === 'downloader') start('downloader');
   });
   pushLayer(layer);
-  focus(root.querySelector('[data-a=go]'));
-  return { root, prog, close };
+  // Fire TV: ask for the permission before downloading, instead of a screen that flickers shut
+  if (!permOk()) needPerm(); else focus(q('[data-a=go]'));
+  installUpdate.showOthers = showOthers;
+  return { root, close };
 }
 
 N.on('update', (d) => {
   const pct = document.getElementById('upd-pct');
   const bar = document.querySelector('.update-progress .bar i');
+  const log = document.querySelector('.upd-log');
+  if (d.state === 'log' && log) { log.hidden = false; log.insertAdjacentHTML('beforeend', `<li>${esc(d.text)}</li>`); }
   if (d.state === 'downloading') { if (bar) bar.style.width = d.pct + '%'; if (pct) pct.textContent = `Downloading ${d.pct}%`; }
   if (d.state === 'installing' && pct) pct.textContent = isMac() ? 'Installing. Lumen TV will restart in a moment.' : 'Choose Install (or Update) on the next screen. Lumen TV reopens by itself when it’s done.';
-  if (d.state === 'permission' && pct) pct.textContent = 'One time only: switch Lumen TV on (Allow / Install unknown apps), then press Back. The update continues by itself.';
-  if (d.state === 'permission-manual') {
-    const msg = 'One time only: press Home, open Settings > My Fire TV > Developer options > Install unknown apps, switch Lumen TV on, then come back. The update installs by itself.';
-    if (pct) pct.textContent = msg;
-    const b = document.querySelector('.update-sheet [data-a=go]'); if (b) b.disabled = false;
-    toast(msg, 'err');
+  if ((d.state === 'permission' || d.state === 'permission-manual') && pct) pct.textContent = 'One time only: ' + PERM_STEPS;
+  if (d.state === 'error') {
+    if (pct) pct.textContent = `Update failed: ${d.msg}`;
+    toast(`Update failed: ${d.msg}`, 'err');
+    if (installUpdate.showOthers) installUpdate.showOthers();
+    const b = document.querySelector('.update-sheet [data-a=amazon]:not([hidden]), .update-sheet [data-a=downloader]:not([hidden])');
+    if (b) focus(b);
   }
-  if (d.state === 'error') { if (pct) pct.textContent = `Update failed: ${d.msg}`; toast(`Update failed: ${d.msg}`, 'err'); }
 });

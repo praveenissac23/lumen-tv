@@ -601,3 +601,7 @@ body.lite .toast { box-shadow: none; }
 .row-hint[hidden] { display: none; }
 .row-hint .ic { font-size: 20px; }
 .pstatus p { margin-top: 18px; font-size: 26px; color: var(--text-2); }
+.upd-log { margin: 14px 0 0 24px; font-size: 20px; color: var(--text-2); max-height: 220px; overflow: hidden; }
+.upd-log li { margin: 3px 0; }
+.upd-perm { margin: 12px 0; padding: 14px 18px; border-radius: 12px; background: rgba(207,169,104,.12); font-size: 22px; line-height: 1.4; }
+.update-sheet .form-actions { flex-wrap: wrap; row-gap: 14px; }

@@ -31,7 +31,7 @@ SIG = {
     'seekBy': ['number'], 'seekTo': ['number'], 'setRect': ['string'], 'setResize': ['string'], 'setBuffer': ['number'],
     'apps': [], 'openWith': ['string', 'string', 'string'], 'copy': ['string'], 'openUrl': ['string'], 'head': ['number', 'string'],
     'call': ['number', 'string', 'string', 'string', 'string'], 'subtitleHash': ['number', 'string'], 'loadSubtitle': ['string', 'string', 'string'],
-    'tracks': [], 'installUpdate': ['string'], 'selectTrack': ['string', 'string'], 'setSpeed': ['number'], 'companion': [], 'showKeyboard': [], 'textInput': ['string', 'string', 'string'],
+    'tracks': [], 'installUpdate': ['string'], 'installUpdateWith': ['string', 'string'], 'selectTrack': ['string', 'string'], 'setSpeed': ['number'], 'companion': [], 'showKeyboard': [], 'textInput': ['string', 'string', 'string'],
 }
 MOCK = """
 (() => {

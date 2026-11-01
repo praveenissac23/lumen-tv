@@ -48,6 +48,8 @@ class NativeBridge(private val act: MainActivity) {
             .put("versionCode", BuildConfig.VERSION_CODE)
             .put("sdk", Build.VERSION.SDK_INT)
             .put("recovered", act.recovered)
+            .put("canInstall", act.updater.canInstall())
+            .put("downloader", try { pm.getPackageInfo(Updater.DOWNLOADER, 0); true } catch (e: Exception) { false })
             .put("cssW", viewCss().first).put("cssH", viewCss().second).toString()
     }
 
@@ -442,7 +444,10 @@ class NativeBridge(private val act: MainActivity) {
 
     // ---------- self update ----------
     @JavascriptInterface
-    fun installUpdate(url: String) { act.updater.install(url) { e, d -> emit(e, d) } }
+    fun installUpdate(url: String) { act.updater.install(url, "auto") { e, d -> emit(e, d) } }
+
+    @JavascriptInterface
+    fun installUpdateWith(url: String, mode: String) { act.updater.install(url, mode) { e, d -> emit(e, d) } }
 
     fun release() {
         recognizer?.destroy()

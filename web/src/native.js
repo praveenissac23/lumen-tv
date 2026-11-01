@@ -269,3 +269,5 @@ export function textInput(title, hint, initial = '') {
 }
 on('textinput', (d) => { const w = textWaiter; textWaiter = null; if (w) w(d && d.text ? String(d.text) : null); });
 export function installUpdate(url) { if (N && N.installUpdate) N.installUpdate(url); }
+// mode: 'auto' | 'amazon' | 'downloader' (TV only)
+export function installUpdateWith(url, mode) { if (N && N.installUpdateWith) N.installUpdateWith(url, mode); else installUpdate(url); }

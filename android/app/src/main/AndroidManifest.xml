@@ -14,6 +14,7 @@
 
     <!-- Lets the app see the speech recognition service on Android 11+ -->
     <queries>
+        <package android:name="com.esaba.downloader" />
         <intent>
             <action android:name="android.speech.RecognitionService" />
         </intent>
