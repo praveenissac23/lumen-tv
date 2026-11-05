@@ -114,18 +114,39 @@ export function toast(msg, kind = '') {
 }
 
 // ---------- option sheet (context menu) ----------
-export function sheet({ title, options, focusIndex = 0 }) {
+// Option menu. With onPick(value), the menu stays open while onPick returns a new list of
+// options (ticks, Move up/down …) and updates in place; any other return closes it.
+export function sheet({ title, options, focusIndex = 0, onPick }) {
   return new Promise((resolve) => {
     clearTimeout(toastT); $('#toast').className = 'toast';
+    let opts = options, busy = false;
+    const item = (o, i) => `<button class="f sheet-item ${o.on ? 'on' : ''}" data-i="${i}">
+        ${o.icon ? icon(o.icon) : ''}<span>${esc(o.label)}</span>${o.hint ? `<small>${esc(o.hint)}</small>` : ''}${o.on ? icon('check', 'tick') : ''}</button>`;
     const root = el(`<div class="sheet-wrap" data-trap><div class="sheet">
       <h2>${esc(title)}</h2>
-      <div class="sheet-list">${options.map((o, i) => `<button class="f sheet-item ${o.on ? 'on' : ''}" data-i="${i}">
-        ${o.icon ? icon(o.icon) : ''}<span>${esc(o.label)}</span>${o.hint ? `<small>${esc(o.hint)}</small>` : ''}${o.on ? icon('check', 'tick') : ''}</button>`).join('')}</div>
+      <div class="sheet-scroll" data-scroll="y" data-pad="90"><div class="sheet-list">${opts.map(item).join('')}</div></div>
     </div></div>`);
     document.getElementById('overlays').appendChild(root);
+    const list = root.querySelector('.sheet-list');
     const close = (v) => { popLayer(layer); root.remove(); resolve(v); };
     const layer = { root, modal: true, onKey: (k) => { if (k === 'back' || k === 'menu') { close(null); return true; } return false; } };
-    root.addEventListener('click', (e) => { const b = e.target.closest('.sheet-item'); if (b) close(options[+b.dataset.i].value ?? +b.dataset.i); });
+    root.addEventListener('click', async (e) => {
+      const b = e.target.closest('.sheet-item');
+      if (!b || busy) return;
+      const i = +b.dataset.i, v = opts[i].value ?? i;
+      if (!onPick) { close(v); return; }
+      busy = true;
+      let next;
+      try { next = await onPick(v); } finally { busy = false; }
+      if (!root.isConnected) return;
+      if (!Array.isArray(next)) { close(v); return; }
+      // update in place: same position, no closing and reopening
+      opts = next;
+      const off = list._off;
+      list.innerHTML = opts.map(item).join('');
+      const at = Math.max(0, Math.min(opts.length - 1, opts.findIndex((o) => o.value === v) >= 0 ? opts.findIndex((o) => o.value === v) : i));
+      focus(list.children[at], { noScroll: off != null });
+    });
     pushLayer(layer);
     focus(root.querySelectorAll('.sheet-item')[focusIndex] || root.querySelector('.sheet-item'));
   });
