@@ -1,8 +1,9 @@
 // Settings: playlists, parental control, categories, playback, voice and remote, guide.
 import { C, testXtream, refresh, refreshEpg, loadFromCache, clearEpgCache } from '../data.js';
 import { epgInfo } from '../epg.js';
-import { S, set, setting, upsertPlaylist, removePlaylist, setLocked, isLocked, setHidden, isHidden, activePlaylist, flush, toggleLang, moveLang, togglePin, langRowsFor, setLangRows, homeSections, setHomeSections } from '../store.js';
+import { S, set, setting, upsertPlaylist, removePlaylist, setLocked, isLocked, setHidden, isHidden, activePlaylist, flush, toggleLang, moveLang, togglePin, langRowsFor, setLangRows, homeSections, setHomeSections, langPrefs, setLangPrefs } from '../store.js';
 import { LANGS, langById, langItems } from '../languages.js';
+import { langCatList, catYear } from '../languages.js';
 import { SUB_LANGS, langName } from '../subs.js';
 import { WALLPAPERS, ACCENTS, applyLook } from '../look.js';
 import qrcode from 'qrcode-generator';
@@ -451,11 +452,19 @@ export class SettingsScreen {
     const name = langById(id).name;
     let focusAt = 0;
     for (;;) {
-      const rows = langRowsFor(id), i = S.myLangs.indexOf(id);
+      const rows = langRowsFor(id), i = S.myLangs.indexOf(id), pr = langPrefs(id);
+      const catsOf = (kind) => langCatList(kind, id);
+      const chosen = (kind) => { const all = catsOf(kind), p = kind === 'movie' ? pr.movieCats : pr.seriesCats; return p ? `${p.length} chosen` : `all ${all.length}`; };
       const opts = [
         { label: `${name} channels`, value: 'live', on: rows.includes('live'), icon: 'tv' },
         { label: `${name} films`, value: 'films', on: rows.includes('films'), icon: 'film' },
+        ...(rows.includes('films') && catsOf('movie').length ? [{ label: `Film categories: ${chosen('movie')}`, value: 'cats-movie', icon: 'list' }] : []),
         { label: `${name} series`, value: 'series', on: rows.includes('series'), icon: 'series' },
+        ...(rows.includes('series') && catsOf('series').length ? [{ label: `Series categories: ${chosen('series')}`, value: 'cats-series', icon: 'list' }] : []),
+        ...(rows.includes('films') || rows.includes('series') ? [
+          { label: pr.order === 'year' ? 'Order: newest year first (2026, 2025, 2024…)' : 'Order: recently added first', value: 'order', icon: 'refresh' },
+          { label: pr.split ? 'Layout: a row for each category' : 'Layout: one row', value: 'split', icon: 'list' },
+        ] : []),
         ...(i > 0 ? [{ label: 'Move up', value: 'up', icon: 'chevron' }] : []),
         ...(i < S.myLangs.length - 1 ? [{ label: 'Move down', value: 'down', icon: 'chevron' }] : []),
         { label: `Remove ${name} from home`, value: 'remove', icon: 'eyeOff' },
@@ -465,12 +474,44 @@ export class SettingsScreen {
       focusAt = Math.max(0, opts.findIndex((o) => o.value === v));
       if (v === 'up' || v === 'down') { moveLang(id, v === 'up' ? -1 : 1); if (!S.myLangs.includes(id)) break; continue; }
       if (v === 'remove') { toggleLang(id); toast(`${name} removed from home`); break; }
+      if (v === 'order') { setLangPrefs(id, { order: pr.order === 'year' ? 'added' : 'year' }); continue; }
+      if (v === 'split') { setLangPrefs(id, { split: !pr.split }); continue; }
+      if (v === 'cats-movie' || v === 'cats-series') { await this.pickLangCats(id, v === 'cats-movie' ? 'movie' : 'series'); continue; }
       const r = new Set(rows); if (r.has(v)) r.delete(v); else r.add(v);
       setLangRows(id, ['live', 'films', 'series'].filter((k) => r.has(k)));
     }
     this.show('langs');
     const b = this.view.querySelector(`[data-act="langedit"][data-arg="${id}"]`) || this.view.querySelector('#st-body .f');
     if (b) focus(b);
+  }
+
+  // Tick the provider categories (e.g. Malayalam 2026, 2025, 2024) that feed a language's home row.
+  async pickLangCats(id, kind) {
+    const mine = langCatList(kind, id);
+    const mineIds = new Set(mine.map((c) => c.id));
+    const others = C.cats[kind].filter((c) => !mineIds.has(c.id) && !c.adult)
+      .map((c, i) => ({ c, i, y: catYear(c.name) })).sort((a, b) => (b.y - a.y) || (a.i - b.i)).map((x) => x.c);
+    const all = mine;
+    const key = kind === 'movie' ? 'movieCats' : 'seriesCats';
+    let focusAt = 0;
+    for (;;) {
+      const cur = langPrefs(id)[key];
+      const on = new Set(cur || all.map((c) => c.id));
+      const count = (c) => C[kind].filter((it) => it.cat === c.id).length;
+      const opts = [
+        { label: cur ? `Use all ${langById(id).name} categories` : `Using all ${langById(id).name} categories`, value: '__all', on: !cur, icon: 'check' },
+        ...all.map((c) => ({ label: `${c.name}  (${count(c)})`, value: c.id, on: on.has(c.id), icon: kind === 'movie' ? 'film' : 'series' })),
+        ...others.map((c) => ({ label: `+ ${c.name}  (${count(c)})`, value: c.id, on: on.has(c.id), icon: 'plus' })),
+      ];
+      const v = await sheet({ title: `${langById(id).name} ${kind === 'movie' ? 'film' : 'series'} categories on the home screen`, options: opts, focusIndex: focusAt });
+      if (v == null) break;
+      focusAt = Math.max(0, opts.findIndex((o) => o.value === v));
+      if (v === '__all') { setLangPrefs(id, { [key]: null }); continue; }
+      if (on.has(v)) on.delete(v); else on.add(v);
+      if (!on.size) { toast('Keep at least one category'); continue; }
+      const onlyMine = on.size === all.length && all.every((c) => on.has(c.id));
+      setLangPrefs(id, { [key]: onlyMine ? null : [...all, ...others].map((c) => c.id).filter((x) => on.has(x)) });
+    }
   }
 
   focus() { focus(this.view.querySelector('.st-sec.on')); }

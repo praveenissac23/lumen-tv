@@ -1,7 +1,7 @@
 // Home: master search bar, last-channel hero with live preview, content rows.
 import { C, nowNext, itemsIn, progs, needsPin } from '../data.js';
-import { S, continueList, isFav, setting, langRowsFor, homeSections } from '../store.js';
-import { langById, langItems, newest } from '../languages.js';
+import { S, continueList, isFav, setting, langRowsFor, homeSections, langPrefs } from '../store.js';
+import { langById, langItems, newest, langCatList, catYear } from '../languages.js';
 import { itemActions } from '../actions.js';
 import { update, installUpdate } from '../updates.js';
 import { esc, hhmm, now, minutesLeft } from '../util.js';
@@ -63,18 +63,12 @@ export class HomeScreen {
           const lang = langById(id);
           if (!lang) continue;
           const parts = langRowsFor(id);
-          if (parts.includes('films')) {
-            const films = cap(newestAll('lf-' + id, langItems('movie', id).filter(ok('movie'))), n);
-            if (films.length) rows.push({ key: 'lf-' + id, title: `New ${lang.name} films`, kind: 'movie', items: films, more: { screen: 'movies', lang: id } });
-          }
+          if (parts.includes('films')) this.langVodRows(rows, 'movie', id, lang, n);
           if (parts.includes('live')) {
             const ch = cap(langItems('live', id).filter(ok('live')), n);
             if (ch.length) rows.push({ key: 'll-' + id, title: `${lang.name} channels`, kind: 'live', items: ch, more: { screen: 'live', lang: id } });
           }
-          if (parts.includes('series')) {
-            const se = cap(newestAll('ls-' + id, langItems('series', id).filter(ok('series'))), n);
-            if (se.length) rows.push({ key: 'ls-' + id, title: `${lang.name} series`, kind: 'series', items: se, more: { screen: 'series', lang: id } });
-          }
+          if (parts.includes('series')) this.langVodRows(rows, 'series', id, lang, n);
         }
       } else if (sec.id === 'pins') {
         for (const pin of S.pins) {
@@ -244,6 +238,42 @@ export class HomeScreen {
     });
     // live preview in the hero
     this.previewTimer = setTimeout(() => this.startPreview(), 500);
+  }
+
+  // A language's films or series: only the categories chosen in Settings > Languages,
+  // newest year first (2026, 2025, 2024 …), as one row or one row per category.
+  langVodRows(rows, kind, id, lang, n) {
+    const pr = langPrefs(id);
+    const picked = kind === 'movie' ? pr.movieCats : pr.seriesCats;
+    const ok = (it) => !needsPin(kind, it.cat);
+    const cap = (list) => (n > 0 ? list.slice(0, n) : list);
+    const word = kind === 'movie' ? 'films' : 'series';
+    const screen = kind === 'movie' ? 'movies' : 'series';
+    let cats = picked
+      ? C.cats[kind].map((c, i) => ({ c, i, y: catYear(c.name) })).filter((x) => picked.includes(x.c.id)).sort((a, b) => (b.y - a.y) || (a.i - b.i)).map((x) => x.c)
+      : langCatList(kind, id);
+    cats = cats.filter((c) => !needsPin(kind, c.id));
+    const inCat = (c) => newestAll(`c-${kind}-${c.id}`, itemsIn(kind, c.id).filter(ok));
+    if (pr.split) {
+      for (const c of cats) {
+        const items = cap(inCat(c));
+        if (items.length) rows.push({ key: `lc-${kind}-${c.id}`, title: c.name, kind, items, more: { screen, cat: c.id } });
+      }
+      return;
+    }
+    let items;
+    if (pr.order === 'year') {
+      const seen = new Set();
+      items = [];
+      for (const c of cats) for (const it of inCat(c)) if (!seen.has(it.id)) { seen.add(it.id); items.push(it); }
+      // titles tagged with the language in other categories come after (only when all categories are used)
+      if (!picked) for (const it of newestAll(`lt-${kind}-${id}`, langItems(kind, id).filter(ok))) if (!seen.has(it.id)) { seen.add(it.id); items.push(it); }
+    } else {
+      const ids = new Set(cats.map((c) => c.id));
+      items = newestAll(`la-${kind}-${id}-${picked ? picked.join('.') : 'all'}`, (picked ? C[kind].filter((it) => ids.has(it.cat)) : langItems(kind, id)).filter(ok));
+    }
+    items = cap(items);
+    if (items.length) rows.push({ key: `l${kind[0]}-${id}`, title: `${lang.name} ${word}`, kind, items, more: { screen, lang: id } });
   }
 
   // The area under the search bar, depending on Settings > Home and languages > Home screen style.

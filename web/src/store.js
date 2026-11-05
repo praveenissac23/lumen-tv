@@ -169,6 +169,14 @@ export function togglePin(kind, cat) {
   save();
   return !on;
 }
+// Per language: which provider categories feed its film / series rows (null = all of them),
+// order ('year' = newest year first, e.g. 2026, 2025, 2024; 'added' = recently added first),
+// and split (one home row per category).
+export function langPrefs(id) {
+  const p = (state.langPrefs || {})[id] || {};
+  return { movieCats: p.movieCats || null, seriesCats: p.seriesCats || null, order: p.order || 'year', split: p.split !== false };
+}
+export function setLangPrefs(id, patch) { state.langPrefs = { ...(state.langPrefs || {}), [id]: { ...langPrefs(id), ...patch } }; save(); }
 export function langRowsFor(id) { return (state.langRows && state.langRows[id]) || ['films']; }
 export function setLangRows(id, rows) { state.langRows = { ...(state.langRows || {}), [id]: rows }; save(); }
 export function toggleLang(id) {

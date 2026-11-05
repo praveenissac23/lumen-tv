@@ -53,6 +53,18 @@ export function langCats(kind, id) {
   return set;
 }
 
+// Year in a category name ("MALAYALAM 2026", "Malayalam Movies [2024]"); 0 when none.
+export function catYear(name) {
+  const m = String(name || '').match(/(?:19|20)\d{2}/g);
+  return m ? Math.max(...m.map(Number)) : 0;
+}
+// A language's categories, newest year first; categories without a year keep the provider's order after them.
+export function langCatList(kind, id) {
+  const set = langCats(kind, id);
+  return C.cats[kind].map((c, i) => ({ c, i, y: catYear(c.name) })).filter((x) => set.has(x.c.id))
+    .sort((a, b) => (b.y - a.y) || (a.i - b.i)).map((x) => x.c);
+}
+
 // Items of a language: in a matching category, or tagged in the title ("ML: ..." / "[Tamil]").
 export function langItems(kind, id) {
   const lang = langById(id);
