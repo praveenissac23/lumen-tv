@@ -1,15 +1,15 @@
 // Home: master search bar, last-channel hero with live preview, content rows.
-import { C, nowNext, itemsIn, progs, needsPin } from '../data.js';
+import { C, nowNext, itemsIn, progs, needsPin, catOf, vodInfo } from '../data.js';
 import { S, continueList, isFav, setting, langRowsFor, homeSections, langPrefs } from '../store.js';
 import { langById, langItems, newest, langCatList, catYear } from '../languages.js';
 import { itemActions } from '../actions.js';
 import { update, installUpdate } from '../updates.js';
-import { esc, hhmm, now, minutesLeft } from '../util.js';
+import { esc, hhmm, now, minutesLeft, tint } from '../util.js';
 import { focus, reveal } from '../nav.js';
-import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots } from '../ui.js';
+import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots, imgUrl } from '../ui.js';
 import { prefetchNow, hasProgs } from '../epg.js';
-import { preview, stopPreview, playLive, playVod, playCatchup } from '../player.js';
-import { movieUrl, episodeUrl } from '../data.js';
+import { preview, previewVod, stopPreview, playLive, playVod, playCatchup } from '../player.js';
+import { movieUrl, episodeUrl, seriesInfo } from '../data.js';
 
 const CHUNK = 30;   // tiles added to a row at a time
 
@@ -104,10 +104,11 @@ export class HomeScreen {
         ${nowSlot(it, 'tile')}</button>`;
     }
     if (kind === 'cont') {
-      return `<button class="f tile land-tile" data-k="cont" data-i="${i}">
-        ${poster({ name: it.title, img: it.poster }, true)}
-        <span class="lt-cap"><b>${esc(it.title)}</b><small>${esc(it.sub || '')}${it.sub ? ' – ' : ''}${it.dur > 0 ? `${Math.max(1, Math.round((it.dur - it.pos) / 60000))} min left` : `Resume from ${Math.floor(it.pos / 60000)} min`}</small></span>
-        ${it.dur > 0 ? progressBar(it.pos / it.dur, 'over') : ''}</button>`;
+      // same poster size as the other rows (the whole picture, nothing cropped), with progress on it
+      const left = it.dur > 0 ? `${Math.max(1, Math.round((it.dur - it.pos) / 60000))} min left` : `From ${Math.floor(it.pos / 60000)} min`;
+      return `<button class="f tile poster-tile cont-tile" data-k="cont" data-i="${i}">
+        ${poster({ name: it.title, img: it.poster })}${it.dur > 0 ? progressBar(it.pos / it.dur, 'over') : ''}
+        <span class="pt-cap"><b>${esc(it.title)}</b><small>${esc(it.sub ? it.sub.replace(/^Season (\d+), episode (\d+)$/, 'S$1 E$2') + ' · ' : '')}${left}</small></span></button>`;
     }
     if (kind === 'cu') {
       return `<button class="f tile cu-tile" data-k="cu" data-i="${i}">
@@ -132,8 +133,9 @@ export class HomeScreen {
     const greet = hour < 5 ? 'Good night' : hour < 12 ? 'Good morning' : hour < 18 ? 'Good afternoon' : 'Good evening';
     const layout = this.layout = this.params.layout || setting('homeLayout') || 'rows';
     this.view.classList.toggle('home-compact', layout === 'compact');
-    this.view.innerHTML = `
-      <div class="home-scroll" data-scroll="y"><div class="home-track">
+    const bb = layout === 'billboard';
+    this.view.classList.toggle('home-bb', bb);
+    const topbar = `
         <header class="topbar">
           <div class="searchbar" data-group="top">
             <button class="f search-field" id="home-search">${icon('search')}<span>Search channels, films, series and what’s on</span></button>
@@ -141,7 +143,11 @@ export class HomeScreen {
           </div>
           ${update.available ? `<button class="f update-pill" id="home-update">${icon('download')}Update available</button>` : ''}
           <div class="topbar-right"><span class="greet">${greet}</span><span class="clock" data-clock>${hhmm(now())}</span></div>
-        </header>
+        </header>`;
+    this.view.innerHTML = `
+      ${bb ? `<section class="bb" id="bb"><div class="bb-bg" id="bb-bg"></div><div class="bb-video" id="hero-video"></div>${topbar}<div class="bb-body" id="bb-body"></div></section>` : ''}
+      <div class="home-scroll${bb ? ' bb-rows' : ''}" data-scroll="y"><div class="home-track">
+        ${bb ? '' : topbar}
         ${this.top(ch)}
         ${ch && layout === 'hero' ? `<section class="hero" data-group="hero">
           <div class="hero-video" id="hero-video"><div class="preview-msg" hidden></div></div>
@@ -158,7 +164,7 @@ export class HomeScreen {
         </section>` : ''}
         ${this.rowData.map((r, ri) => `<section class="row row-${r.kind}" data-row="${ri}">
           <h2>${esc(r.title)}${r.pinned ? icon('pin', 'pinmark') : ''}<small>${r.items.length > 12 ? r.items.length.toLocaleString() : ''}</small><span class="row-hint" hidden>${icon('back')}Back: start of row, then menu</span></h2>
-          <div class="row-clip" data-scroll="x" data-pad="72"><div class="row-track" data-group="row${ri}">
+          <div class="row-clip" data-scroll="x" data-pad="40" data-anchor="start"><div class="row-track" data-group="row${ri}">
             ${r.items.slice(0, (r.shown = Math.min(r.items.length, CHUNK))).map((it, i) => this.tile(r.kind, it, i)).join('')}
             ${r.more ? `<button class="f tile more-tile ${r.kind === 'movie' || r.kind === 'series' ? 'tall' : ''}" data-k="more">${icon('chevron')}<span>See all</span></button>` : ''}
           </div></div></section>`).join('')}
@@ -205,6 +211,7 @@ export class HomeScreen {
         for (const h of v.querySelectorAll('.row-hint')) if (h !== hint) h.hidden = true;
         if (r && r.shown < r.items.length && idx >= r.shown - 8) this.growRow(rowEl);
       }
+      if (this.layout === 'billboard') this.bbFocus(tile, rowEl);
       // clicking with the mouse shouldn't move the page
       if (window.__pointerFocus && Date.now() - window.__pointerFocus < 400) return;
       // focusing the hero region keeps the page at the top; rows scroll the page
@@ -217,9 +224,12 @@ export class HomeScreen {
         const sec = e.target.closest('.row');
         if (sec) {
           // first row sits under the hero; later rows scroll to just below the top edge
-          const y = sec.dataset.row === '0' ? 0 : Math.max(0, sec.offsetTop - 64);
-          if (y && !tr._off) { clearTimeout(this.previewTimer); stopPreview(); }
-          if (!y && tr._off) { clearTimeout(this.previewTimer); this.previewTimer = setTimeout(() => this.startPreview(), 350); }
+          // (with the billboard every row slides up to the same line, like a shelf)
+          const y = this.layout === 'billboard' ? sec.offsetTop - 18 : sec.dataset.row === '0' ? 0 : Math.max(0, sec.offsetTop - 64);
+          if (this.layout !== 'billboard') {
+            if (y && !tr._off) { clearTimeout(this.previewTimer); stopPreview(); }
+            if (!y && tr._off) { clearTimeout(this.previewTimer); this.previewTimer = setTimeout(() => this.startPreview(), 350); }
+          }
           tr._off = -y; tr.style.transform = y ? `translate3d(0,${-y}px,0)` : '';
         }
       }
@@ -237,7 +247,11 @@ export class HomeScreen {
       else this.previewTimer = setTimeout(() => { const tr = v.querySelector('.home-track'); if (!tr._off || tr._off > -200) this.startPreview(); }, 400);
     });
     // live preview in the hero
-    this.previewTimer = setTimeout(() => this.startPreview(), 500);
+    if (this.layout === 'hero') this.previewTimer = setTimeout(() => this.startPreview(), 500);
+    if (this.layout === 'billboard') this.bbShow(null);
+    // a preview that won't play: put the picture back
+    this.onPvFail = () => { if (this.bbPreviewing) { this.bbPreviewing = false; stopPreview(); this.view.classList.remove('bb-live'); } };
+    document.addEventListener('preview-failed', this.onPvFail);
   }
 
   // A language's films or series: only the categories chosen in Settings > Languages,
@@ -299,6 +313,122 @@ export class HomeScreen {
       }
     }
     return '';
+  }
+
+
+  // ---------- billboard: the top of the screen shows whatever is focused ----------
+  bbFocus(tile, rowEl) {
+    clearTimeout(this.bbTimer);
+    const key = tile ? `${tile.dataset.k}|${tile.dataset.id || tile.dataset.i}|${rowEl && rowEl.dataset.row}` : '';
+    if (key === this.bbKey) return;
+    // a short pause so holding an arrow key doesn't redraw it for every tile passed
+    this.bbTimer = setTimeout(() => this.bbShow(tile, rowEl, key), tile ? 90 : 0);
+  }
+
+  bbItem(tile, rowEl) {
+    if (!tile) {
+      const first = this.rowData[0];
+      if (first && first.items[0]) return { kind: first.kind, it: first.items[0], row: first };
+      return this.hero ? { kind: 'live', it: this.hero } : null;
+    }
+    const row = this.rowData[+rowEl.dataset.row];
+    const k = tile.dataset.k;
+    if (k === 'more') return { kind: 'more', row };
+    if (k === 'live' || k === 'movie' || k === 'series') return { kind: k, it: C.byId[k].get(tile.dataset.id), row };
+    return { kind: k, it: row.items[+tile.dataset.i], row };
+  }
+
+  bbShow(tile, rowEl, key = '') {
+    const box = this.view.querySelector('#bb-body'), bg = this.view.querySelector('#bb-bg');
+    if (!box) return;
+    this.bbKey = key;
+    clearTimeout(this.bbPrevTimer); clearTimeout(this.bbInfoTimer);
+    if (this.bbPreviewing) { stopPreview(); this.bbPreviewing = false; this.view.classList.remove('bb-live'); }
+    const x = this.bbItem(tile, rowEl);
+    if (!x || (!x.it && x.kind !== 'more')) { box.innerHTML = ''; bg.innerHTML = ''; return; }
+    const { kind, it, row } = x;
+    let kicker = '', title = '', meta = '', extra = '', img = '', art = '';
+    if (kind === 'live') {
+      const nn = nowNext(it), cur = nn && nn.now, nxt = nn && nn.next;
+      kicker = `<span class="bb-live-dot"></span>Live · Channel ${it.num}`;
+      title = esc(it.name);
+      meta = cur ? `<b>${esc(cur.t)}</b>` : '<span class="muted">No guide information</span>';
+      extra = cur ? `<div class="bb-time"><span>${hhmm(cur.s)}</span>${progressBar(cur.pct)}<span>${hhmm(cur.e)}</span></div>${nxt ? `<p class="bb-next">Next ${hhmm(nxt.s)} · ${esc(nxt.t)}</p>` : ''}` : '';
+      const t = tint(it.name);
+      art = `<span class="bb-glow" style="--la:${t.a};--lb:${t.b}"></span><span class="bb-logo">${logo(it, 'lg')}</span>`;
+    } else if (kind === 'cu') {
+      kicker = `${icon('history')}Catch-up · ${esc(it.ch.name)}`;
+      title = esc(it.t);
+      meta = `${hhmm(it.s)}–${hhmm(it.e)}`;
+      art = `<span class="bb-logo">${logo(it.ch, 'lg')}</span>`;
+    } else if (kind === 'more') {
+      kicker = 'See all';
+      title = esc(row.title);
+      meta = `${row.items.length.toLocaleString()} titles`;
+    } else {
+      const vod = kind === 'cont' || kind === 'rv';
+      const name = vod ? it.title : it.name;
+      img = vod ? it.poster : it.img;
+      const cat = !vod && catOf(kind, it.cat);
+      kicker = kind === 'cont' ? 'Continue watching' : kind === 'rv' ? 'Watched recently' : `${kind === 'movie' ? 'Film' : 'Series'}${cat ? ' · ' + esc(cat.name) : ''}`;
+      title = esc(name);
+      const bits = [];
+      if (it.year) bits.push(`<span>${it.year}</span>`);
+      if (it.rating) bits.push(`<span class="bb-rate">${icon('starFill')}${(+it.rating).toFixed(1)}</span>`);
+      if (it.genre) bits.push(`<span>${esc(String(it.genre).split(/[,/]/).slice(0, 2).join(' · '))}</span>`);
+      if (vod && it.sub) bits.push(`<span>${esc(it.sub)}</span>`);
+      meta = bits.join('<i class="bb-dot"></i>');
+      if (kind === 'cont' && it.dur > 0) extra = `<div class="bb-time">${progressBar(it.pos / it.dur)}<span>${Math.max(1, Math.round((it.dur - it.pos) / 60000))} min left</span></div>`;
+      extra += `<p class="bb-plot" id="bb-plot">${esc(it.plot || '')}</p>`;
+      art = img ? `<img class="bb-blur" src="${esc(imgUrl(img, 64))}" alt="" onerror="this.remove()"><img class="bb-poster" src="${esc(imgUrl(img, 320))}" alt="" onerror="this.remove()">` : '';
+    }
+    box.innerHTML = `<div class="bb-in"><p class="bb-kicker">${kicker}</p><h1 class="bb-title${title.length > 28 ? ' long' : ''}">${title}</h1><div class="bb-meta">${meta}</div>${extra}</div>`;
+    bg.innerHTML = art ? `<div class="bb-art${img ? ' has-img' : ''}">${art}</div>` : '';
+    // films: fetch the synopsis and the wide picture once you stay on one, then play it (like Netflix)
+    let info = null;
+    if (kind === 'movie' && it) {
+      this.bbInfoTimer = setTimeout(() => {
+        vodInfo(it.id).then((inf) => {
+          info = inf;
+          if (!inf || this.bbKey !== key) return;
+          const p = this.view.querySelector('#bb-plot'); if (p && inf.plot && !it.plot) p.textContent = inf.plot;
+          if (inf.backdrop) {
+            const a = this.view.querySelector('#bb-bg .bb-art');
+            if (a) { const im = new Image(); im.className = 'bb-wide'; im.alt = ''; im.onload = () => { if (this.bbKey === key) { a.appendChild(im); a.classList.add('wide'); } }; im.src = imgUrl(inf.backdrop, 960); }
+          }
+        }).catch(() => {});
+      }, 450);
+    }
+    const auto = setting('preview') && setting('autoPreview') !== false;
+    const playIn = (fn) => {
+      this.bbPrevTimer = setTimeout(async () => {
+        if (this.bbKey !== key || !this.app.current() || this.app.current().ctl !== this) return;
+        const vb = this.view.querySelector('#hero-video');
+        const r = vb && rectOf(vb);
+        if (!r) return;
+        try { if (await fn(r) === false || this.bbKey !== key) return; } catch (e) { return; }
+        this.bbPreviewing = true; this.view.classList.add('bb-live');
+      }, kind === 'live' ? 1400 : 2600);
+    };
+    if (auto && (kind === 'movie' || kind === 'cont' || kind === 'series') && it && !needsPin(kind === 'cont' ? 'movie' : kind, it.cat)) {
+      playIn(async (r) => {
+        if (kind === 'cont') { previewVod(it.key, it.key.startsWith('movie:') ? movieUrl({ id: it.key.slice(6), ext: it.ext, url: it.url }) : episodeUrl({ id: it.key.slice(3), ext: it.ext, url: it.url }), r, it.pos); return true; }
+        if (kind === 'movie') {
+          const secs = (info && info.durSecs) || 0;
+          previewVod('m:' + it.id, movieUrl(it), r, secs > 1200 ? secs * 1000 * 0.12 : 6 * 60000);
+          return true;
+        }
+        const si = await seriesInfo(it.id);
+        if (this.bbKey !== key) return false;
+        const sn = Object.keys(si.seasons || {}).sort((a, b) => a - b)[0];
+        const ep = sn && si.seasons[sn][0];
+        if (!ep) return false;
+        previewVod('s:' + it.id, episodeUrl(ep), r, 3 * 60000);
+        return true;
+      });
+    }
+    // channels: after a moment, the live picture plays up there
+    if (auto && kind === 'live' && it && !needsPin('live', it.cat)) playIn(async (r) => { preview(it, r); return true; });
   }
 
   // Add the next tiles to an endless row.
@@ -369,7 +499,7 @@ export class HomeScreen {
       const t = this.view.querySelector(r.sel);
       if (t) { focus(t); return; }
     }
-    focus(this.view.querySelector('#spot-play') || this.view.querySelector('#hero-watch') || this.view.querySelector('.shortcut') || this.view.querySelector('.tile') || this.view.querySelector('#home-search'));
+    focus((this.layout === 'billboard' && this.view.querySelector('.tile')) || this.view.querySelector('#spot-play') || this.view.querySelector('#hero-watch') || this.view.querySelector('.shortcut') || this.view.querySelector('.tile') || this.view.querySelector('#home-search'));
   }
 
   save() {
@@ -394,6 +524,7 @@ export class HomeScreen {
   }
 
   destroy() {
+    clearTimeout(this.bbTimer); clearTimeout(this.bbPrevTimer); clearTimeout(this.bbInfoTimer); document.removeEventListener('preview-failed', this.onPvFail);
     document.removeEventListener('progress-changed', this.onProg); clearTimeout(this.previewTimer); stopPreview(); document.removeEventListener('update-available', this.onUpd); }
 }
 

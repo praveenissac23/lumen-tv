@@ -5,7 +5,7 @@ import { S, set, setting, upsertPlaylist, removePlaylist, setLocked, isLocked, s
 import { LANGS, langById, langItems } from '../languages.js';
 import { langCatList, catYear } from '../languages.js';
 import { SUB_LANGS, langName } from '../subs.js';
-import { WALLPAPERS, ACCENTS, applyLook } from '../look.js';
+import { WALLPAPERS, ACCENTS, THEMES, applyLook } from '../look.js';
 import qrcode from 'qrcode-generator';
 import { update, checkForUpdate, installUpdate, currentBuild } from '../updates.js';
 import { esc } from '../util.js';
@@ -14,7 +14,7 @@ import { icon, toast, sheet, form, pinPad } from '../ui.js';
 import * as N from '../native.js';
 
 const SECTIONS = [
-  ['playlists', 'Playlists', 'list'], ['home', 'Home screen', 'home'], ['langs', 'Languages', 'globe'], ['look', 'Wallpaper and colour', 'image'],
+  ['playlists', 'Playlists', 'list'], ['home', 'Home screen', 'home'], ['langs', 'Languages', 'globe'], ['look', 'Theme and wallpaper', 'image'],
   ['downloads', 'Downloads and players', 'download'], ['subs', 'Subtitles', 'subtitles'], ['phone', 'Phone remote', 'phone'],
   ['voice', 'Voice search', 'mic'], ['parental', 'Parental control', 'lock'], ['cats', 'Categories', 'eyeOff'],
   ['playback', 'Playback', 'play'], ['guide', 'TV guide', 'guide'], ['about', 'About', 'tv'],
@@ -101,7 +101,8 @@ export class SettingsScreen {
     const cnt = (n) => (n > 0 ? `${n} items` : 'All, keeps loading');
     return `<h1>Home screen</h1>
       <p class="st-intro">Choose what the home screen shows, how many items each row has, and the order. Press OK on a row to change it.</p>
-      ${this.row('Style', { rows: 'Just rows', hero: 'Live preview on top', shortcuts: 'Shortcut buttons', spotlight: 'Big Continue card', compact: 'Compact rows' }[setting('homeLayout') || 'rows'], 'pick', 'homeLayout', 'What sits above the rows')}
+      ${this.row('Style', { billboard: 'Preview banner', rows: 'Just rows', hero: 'Live preview on top', shortcuts: 'Shortcut buttons', spotlight: 'Big Continue card', compact: 'Compact rows' }[setting('homeLayout') || 'rows'], 'pick', 'homeLayout', 'What sits above the rows')}
+      ${this.row('Play previews in the banner', this.toggle(setting('autoPreview') !== false), 'tog', 'autoPreview', 'Stay on a film or channel and it starts playing at the top, like Netflix')}
       <h2>Rows, in order</h2>
       ${secs.map((sc, i) => this.row(`${i + 1}. ${sc.label}`, sc.on ? `<span class="pill on">${esc(cnt(sc.n))}</span>` : '<span class="pill">Hidden</span>', 'homerow', sc.id,
         sc.id === 'langs' ? 'Which languages and which rows each gets: Settings > Languages' : sc.id === 'pins' ? 'Hold OK on a category in Live TV or Films to pin it' : '')).join('')}
@@ -151,7 +152,11 @@ export class SettingsScreen {
 
   look() {
     const wp = setting('wallpaper');
-    return `<h1>Wallpaper and colour</h1>
+    const th = setting('theme') || 'classic';
+    return `<h1>Theme</h1>
+      <div class="swatches themes" data-group="th">${THEMES.map((t) => `<button class="f swatch ${t.id === th ? 'on' : ''}" data-act="theme" data-arg="${t.id}">
+        <span class="sw-prev sw-theme" style="--ta:${t.a};--tb:${t.b};--tbg:${t.bg}"><i></i><i></i><i></i></span><b>${esc(t.name)}</b><small>${esc(t.sub)}</small></button>`).join('')}</div>
+      <h2>Wallpaper (Classic theme)</h2>
       <div class="swatches" data-group="wp">${WALLPAPERS.map((w) => `<button class="f swatch ${w.id === wp ? 'on' : ''}" data-act="wp" data-arg="${w.id}">
         <span class="sw-prev wp-${w.id}"${w.id === 'image' && setting('wallpaperUrl') ? ` style="background-image:url('${esc(setting('wallpaperUrl'))}')"` : ''}>${w.id === 'bubbles' ? '<i></i><i></i><i></i>' : ''}${w.id === 'image' && !setting('wallpaperUrl') ? icon('image') : ''}</span><b>${esc(w.name)}</b></button>`).join('')}</div>
       ${this.row('Moving bubbles', this.toggle(setting('motion')), 'tog', 'motion', 'Very slow, light shapes in the background. Paused while a video plays.')}
@@ -268,8 +273,9 @@ export class SettingsScreen {
       setting('homeLangRows', [...r].filter(Boolean).join(',')); this.repaint(btn); return;
     }
     if (a === 'unpin') { const [kind, cat] = arg.split(':'); togglePin(kind, cat); this.show('langs'); focusFirst(this.view.querySelector('#st-body')); return; }
-    if (a === 'wp') { setting('wallpaper', arg); if (arg === 'image' && !setting('wallpaperUrl')) return this.act('wpurl', '', btn); applyLook(); this.repaint(btn); return; }
+    if (a === 'wp') { setting('theme', 'classic'); setting('wallpaper', arg); if (arg === 'image' && !setting('wallpaperUrl')) return this.act('wpurl', '', btn); applyLook(); this.repaint(btn); return; }
     if (a === 'accent') { setting('accent', arg); applyLook(); this.repaint(btn); return; }
+    if (a === 'theme') { setting('theme', arg); applyLook(); this.repaint(btn); return; }
     if (a === 'wpurl') {
       const v = await form({ title: 'Wallpaper picture', note: 'Paste a link to a JPG or PNG. Tip: send it from the phone remote instead of typing.', fields: [{ name: 'url', label: 'Image link', value: setting('wallpaperUrl'), placeholder: 'https://\u2026/picture.jpg' }] });
       if (v) { setting('wallpaperUrl', v.url); if (v.url) setting('wallpaper', 'image'); applyLook(); }
@@ -325,7 +331,7 @@ export class SettingsScreen {
         epgOffsetHours: [-3, -2, -1, 0, 1, 2, 3].map((h) => [h, h === 0 ? 'No shift' : `${h > 0 ? '+' : ''}${h} h`]),
         startScreen: [['home', 'Home'], ['live', 'Live TV'], ['guide', 'TV guide']],
         catalogueRefresh: [[1, 'Every day'], [2, 'Every 2 days'], [3, 'Every 3 days'], [7, 'Every 7 days'], [0, 'Only when I press Refresh']],
-        homeLayout: [['rows', 'Just rows'], ['hero', 'Live preview on top'], ['shortcuts', 'Shortcut buttons'], ['spotlight', 'Big Continue card'], ['compact', 'Compact rows']],
+        homeLayout: [['billboard', 'Preview banner (focused title on top)'], ['rows', 'Just rows'], ['hero', 'Live preview on top'], ['shortcuts', 'Shortcut buttons'], ['spotlight', 'Big Continue card'], ['compact', 'Compact rows']],
         subSize: [['s', 'Small'], ['m', 'Medium'], ['l', 'Large']],
         uiSize: [['s', 'Smaller (if edges are cut off)'], ['m', 'Fit the TV'], ['l', 'Larger']],
       }[arg];

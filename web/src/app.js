@@ -48,6 +48,8 @@ function mountShell() {
     <div id="overlays"></div>
     <div id="voice" class="voice" hidden></div>
     <div id="toast" class="toast"></div>`);
+  // build 24: new look (Neon theme, preview banner on home) once, for existing installs too
+  if (!setting('look24')) { setting('look24', true); setting('theme', 'neon'); setting('homeLayout', 'billboard'); }
   mountBackground();
   appLayer.root = $('#app');
   pushLayer(appLayer);
@@ -389,3 +391,4 @@ boot();
 addEventListener('pagehide', flush);
 window.__app = app;
 window.__C = C;
+window.__look = (t) => { setting('theme', t); applyLook(); };

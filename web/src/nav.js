@@ -171,6 +171,7 @@ export function focusFirst(root, sel) {
 export function move(dir, root) {
   const cur = document.activeElement;
   if (!cur || !root.contains(cur) || !cur.classList.contains('f')) { focusFirst(root); return true; }
+  let xRow = null;
   // Fast path: left/right inside a sideways row just steps to the neighbouring tile
   // (measuring every button on a busy screen for each key press is what makes a TV stick lag).
   if ((dir === 'left' || dir === 'right') && cur.parentElement && cur.parentElement.parentElement &&
@@ -178,6 +179,9 @@ export function move(dir, root) {
     let n = dir === 'right' ? cur.nextElementSibling : cur.previousElementSibling;
     while (n && !(n.classList.contains('f') && !n.disabled && !n.hidden)) n = dir === 'right' ? n.nextElementSibling : n.previousElementSibling;
     if (n) { focus(n); return true; }
+    // End of a row: stay put (never jump to a tile in another row).
+    if (dir === 'right') { cur.dispatchEvent(new CustomEvent('edge', { bubbles: true, detail: dir })); return true; }
+    xRow = cur.parentElement.parentElement;
   }
   const scope = cur.closest('[data-trap]') || root;
   const a = cur.getBoundingClientRect();
@@ -189,6 +193,8 @@ export function move(dir, root) {
   for (const el of focusables(scope)) {
     if (el === cur) continue;
     if ((dir === 'up' || dir === 'down') && el.closest('[data-zone]') !== zone) continue;
+    // Left from the start of a row goes out of the rows (to the menu), not into another row.
+    if (xRow && el.closest('[data-scroll="x"]')) continue;
     const b = el.getBoundingClientRect();
     const bx = b.left + b.width / 2, by = b.top + b.height / 2;
     let main, cross, beam;

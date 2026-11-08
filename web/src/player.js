@@ -74,6 +74,7 @@ N.on('player', (d) => {
     }
     if (status) { status.className = 'pstatus show err'; status.textContent = d.msg || 'This stream didn’t start. Try another channel or check your connection.'; }
     const pv = document.querySelector('.preview-msg'); if (pv) { pv.hidden = false; pv.textContent = 'Preview unavailable'; }
+    if (!P.mode) document.dispatchEvent(new CustomEvent('preview-failed'));
   }
 });
 
@@ -141,6 +142,14 @@ export function preview(ch, rect) {
   if (P.previewCh === ch) { N.setRect(rect); return; }
   P.previewCh = ch;
   N.play(urlOr(liveUrl(ch)), { rect, live: true });
+}
+// Film / episode preview (home banner): plays from a point inside, in the given box.
+export function previewVod(key, url, rect, start = 0) {
+  if (!setting('preview') || P.mode) return;
+  hole(rect);
+  if (P.previewCh === key) { N.setRect(rect); return; }
+  P.previewCh = key;
+  N.play(urlOr(url), { rect, live: false, start: Math.max(0, Math.round(start)) });
 }
 export function stopPreview() { if (P.previewCh && !P.mode) N.stop(); P.previewCh = null; if (!P.mode) hole(null); }
 

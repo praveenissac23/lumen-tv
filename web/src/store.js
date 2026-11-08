@@ -20,6 +20,7 @@ const DEFAULTS = {
   settings: {
     autoplayLast: true,
     preview: true,
+    autoPreview: true,     // home banner plays the focused film / channel after a moment
     buffer: 'normal',      // low | normal | high
     resize: 'fit',         // fit | fill | zoom
     zapKeys: 'updown',     // updown | reversed
@@ -28,6 +29,7 @@ const DEFAULTS = {
     wallpaper: 'bubbles',  // bubbles | plain | teal | plum | dusk | image
     wallpaperUrl: '',
     motion: true,          // slowly moving bubbles
+    theme: 'neon',       // cinema | aurora | royal | neon | classic (wallpaper + accent)
     accent: 'brass',       // brass | teal | coral | violet
     subLangs: ['en'],      // preferred subtitle languages (ISO 639-1)
     subAuto: false,        // fetch subtitles online automatically for films and episodes
@@ -44,7 +46,7 @@ const DEFAULTS = {
     lite: true,            // lighter animations for TV sticks
     autoAppUpdate: true,   // download new app builds by themselves and show the Install screen
     catalogueRefresh: 1,   // days between automatic channel/film updates (0 = only when you press Refresh)
-    homeLayout: 'rows',    // rows | hero | shortcuts | spotlight | compact
+    homeLayout: 'billboard', // billboard | rows | hero | shortcuts | spotlight | compact
   },
 };
 

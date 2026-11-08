@@ -11,6 +11,14 @@ export const WALLPAPERS = [
   { id: 'forest', name: 'Kerala green' },
   { id: 'image', name: 'Your picture' },
 ];
+// Whole-app colour themes: background, surfaces, highlight and glow together.
+export const THEMES = [
+  { id: 'cinema', name: 'Cinema', sub: 'Ember red to amber, on black', a: '#ff2f45', b: '#ffc15c', bg: '#0a0809' },
+  { id: 'aurora', name: 'Aurora', sub: 'Cyan and violet northern lights', a: '#2bf0d0', b: '#9b6bff', bg: '#060a14' },
+  { id: 'royal', name: 'Royal', sub: 'Gold on warm black', a: '#b8862c', b: '#fff0c2', bg: '#0b0a09' },
+  { id: 'neon', name: 'Neon', sub: 'Magenta and electric blue', a: '#ff2fa0', b: '#3f7bff', bg: '#08050f' },
+  { id: 'classic', name: 'Classic', sub: 'Your wallpaper and highlight colour below', a: '#cfa968', b: '#e6c88f', bg: '#12161b' },
+];
 export const ACCENTS = [
   { id: 'brass', name: 'Brass', c: '#cfa968', c2: '#e6c88f', on: '#1d160a' },
   { id: 'teal', name: 'Lagoon', c: '#5cc4b4', c2: '#8fdccf', on: '#06201c' },
@@ -40,14 +48,19 @@ export function mountBackground() {
 
 export function applyLook() {
   const st = document.getElementById('stage');
-  const wp = setting('wallpaper') || 'bubbles';
+  const theme = setting('theme') || 'classic';
+  const themed = theme !== 'classic';
+  if (themed) document.documentElement.dataset.theme = theme; else delete document.documentElement.dataset.theme;
+  const wp = themed ? 'theme' : setting('wallpaper') || 'bubbles';
   st.dataset.wp = wp;
   st.classList.toggle('motion', !!setting('motion') && (wp === 'bubbles' || wp === 'teal' || wp === 'plum' || wp === 'dusk' || wp === 'forest'));
   const img = document.querySelector('#bg .bg-img');
   if (img) img.style.backgroundImage = wp === 'image' && setting('wallpaperUrl') ? `url("${esc(setting('wallpaperUrl'))}")` : '';
   const a = ACCENTS.find((x) => x.id === setting('accent')) || ACCENTS[0];
   const r = document.documentElement.style;
+  if (themed) { for (const k of ['--brass', '--brass-2', '--on-brass', '--glow']) r.removeProperty(k); return; }
   r.setProperty('--brass', a.c); r.setProperty('--brass-2', a.c2); r.setProperty('--on-brass', a.on);
+  r.setProperty('--glow', a.c + '73');
 }
 
 // Cut a window in the wallpaper so the video preview underneath shows through.
