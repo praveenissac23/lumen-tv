@@ -96,7 +96,7 @@ class PlayerHost(
             .setBufferDurationsMs(
                 maxOf(bufferMs, 2500),       // min buffer
                 maxOf(bufferMs * 4, 30000),  // max buffer
-                minOf(bufferMs, 2500).coerceAtLeast(700), // start playing after
+                minOf(bufferMs, 1000).coerceAtLeast(700), // start playing after (quick: channels and previews come up fast)
                 bufferMs,                    // after a rebuffer
             )
             .setPrioritizeTimeOverSizeThresholds(true)
@@ -104,7 +104,7 @@ class PlayerHost(
         else DefaultLoadControl.Builder()
             // Films and episodes: read far ahead (up to 10 minutes / 160 MB) and keep the last
             // 2 minutes, so skipping forward or back inside that window is instant.
-            .setBufferDurationsMs(60_000, 600_000, 2_500, 5_000)
+            .setBufferDurationsMs(60_000, 600_000, 1_200, 5_000)   // starts after 1.2 s, then reads ahead
             .setTargetBufferBytes(160 * 1024 * 1024)
             .setPrioritizeTimeOverSizeThresholds(false)
             .setBackBuffer(120_000, true)

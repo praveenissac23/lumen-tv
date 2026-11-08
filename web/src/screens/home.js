@@ -13,6 +13,18 @@ import { movieUrl, episodeUrl, seriesInfo } from '../data.js';
 
 const CHUNK = 30;   // tiles added to a row at a time
 
+// First episode of a series, for the banner preview (kept for the session).
+const firstEps = new Map();
+function seriesFirstEp(id) {
+  if (!firstEps.has(id)) {
+    firstEps.set(id, seriesInfo(id).then((si) => {
+      const sn = Object.keys((si && si.seasons) || {}).sort((a, b) => a - b)[0];
+      return (sn && si.seasons[sn][0]) || null;
+    }).catch(() => { firstEps.delete(id); return null; }));
+  }
+  return firstEps.get(id);
+}
+
 // Newest-first lists, sorted once per catalogue load (sorting 50,000 films on every visit is slow on a TV stick).
 const sorted = new Map();
 function newestAll(key, list) {
@@ -166,7 +178,6 @@ export class HomeScreen {
           <h2>${esc(r.title)}${r.pinned ? icon('pin', 'pinmark') : ''}<small>${r.items.length > 12 ? r.items.length.toLocaleString() : ''}</small><span class="row-hint" hidden>${icon('back')}Back: start of row, then menu</span></h2>
           <div class="row-clip" data-scroll="x" data-pad="40" data-anchor="start"><div class="row-track" data-group="row${ri}">
             ${r.items.slice(0, (r.shown = Math.min(r.items.length, CHUNK))).map((it, i) => this.tile(r.kind, it, i)).join('')}
-            ${r.more ? `<button class="f tile more-tile ${r.kind === 'movie' || r.kind === 'series' ? 'tall' : ''}" data-k="more">${icon('chevron')}<span>See all</span></button>` : ''}
           </div></div></section>`).join('')}
         ${!this.rowData.length ? `<section class="empty"><h2>Add a playlist to get started</h2><p>Open Settings and add your Xtream login or M3U link.</p></section>` : ''}
       </div></div>`;
@@ -209,7 +220,7 @@ export class HomeScreen {
         const hint = rowEl.querySelector('.row-hint');
         if (hint) hint.hidden = idx < 5;
         for (const h of v.querySelectorAll('.row-hint')) if (h !== hint) h.hidden = true;
-        if (r && r.shown < r.items.length && idx >= r.shown - 8) this.growRow(rowEl);
+        if (r && r.shown < r.items.length && idx >= r.shown - 16) this.growRow(rowEl);   // load well ahead, so the row never seems to end
       }
       if (this.layout === 'billboard') this.bbFocus(tile, rowEl);
       // clicking with the mouse shouldn't move the page
@@ -252,6 +263,8 @@ export class HomeScreen {
     // a preview that won't play: put the picture back
     this.onPvFail = () => { if (this.bbPreviewing) { this.bbPreviewing = false; stopPreview(); this.view.classList.remove('bb-live'); } };
     document.addEventListener('preview-failed', this.onPvFail);
+    this.onPvReady = () => { if (this.bbPreviewing) this.view.classList.add('bb-live'); };
+    document.addEventListener('preview-ready', this.onPvReady);
   }
 
   // A language's films or series: only the categories chosen in Settings > Languages,
@@ -385,11 +398,9 @@ export class HomeScreen {
     box.innerHTML = `<div class="bb-in"><p class="bb-kicker">${kicker}</p><h1 class="bb-title${title.length > 28 ? ' long' : ''}">${title}</h1><div class="bb-meta">${meta}</div>${extra}</div>`;
     bg.innerHTML = art ? `<div class="bb-art${img ? ' has-img' : ''}">${art}</div>` : '';
     // films: fetch the synopsis and the wide picture once you stay on one, then play it (like Netflix)
-    let info = null;
     if (kind === 'movie' && it) {
       this.bbInfoTimer = setTimeout(() => {
         vodInfo(it.id).then((inf) => {
-          info = inf;
           if (!inf || this.bbKey !== key) return;
           const p = this.view.querySelector('#bb-plot'); if (p && inf.plot && !it.plot) p.textContent = inf.plot;
           if (inf.backdrop) {
@@ -400,6 +411,8 @@ export class HomeScreen {
       }, 450);
     }
     const auto = setting('preview') && setting('autoPreview') !== false;
+    // series: look up the first episode straight away (cached), so the preview can start at once
+    const epP = auto && kind === 'series' && it ? seriesFirstEp(it.id) : null;
     const playIn = (fn) => {
       this.bbPrevTimer = setTimeout(async () => {
         if (this.bbKey !== key || !this.app.current() || this.app.current().ctl !== this) return;
@@ -407,23 +420,18 @@ export class HomeScreen {
         const r = vb && rectOf(vb);
         if (!r) return;
         try { if (await fn(r) === false || this.bbKey !== key) return; } catch (e) { return; }
-        this.bbPreviewing = true; this.view.classList.add('bb-live');
-      }, kind === 'live' ? 1400 : 2600);
+        // the picture stays until the video actually shows, so there's never a black gap
+        this.bbPreviewing = true;
+      }, kind === 'live' ? 450 : 600);
     };
     if (auto && (kind === 'movie' || kind === 'cont' || kind === 'series') && it && !needsPin(kind === 'cont' ? 'movie' : kind, it.cat)) {
       playIn(async (r) => {
         if (kind === 'cont') { previewVod(it.key, it.key.startsWith('movie:') ? movieUrl({ id: it.key.slice(6), ext: it.ext, url: it.url }) : episodeUrl({ id: it.key.slice(3), ext: it.ext, url: it.url }), r, it.pos); return true; }
-        if (kind === 'movie') {
-          const secs = (info && info.durSecs) || 0;
-          previewVod('m:' + it.id, movieUrl(it), r, secs > 1200 ? secs * 1000 * 0.12 : 6 * 60000);
-          return true;
-        }
-        const si = await seriesInfo(it.id);
-        if (this.bbKey !== key) return false;
-        const sn = Object.keys(si.seasons || {}).sort((a, b) => a - b)[0];
-        const ep = sn && si.seasons[sn][0];
-        if (!ep) return false;
-        previewVod('s:' + it.id, episodeUrl(ep), r, 3 * 60000);
+        // from the beginning: no seeking inside the file, so the picture comes up fastest
+        if (kind === 'movie') { previewVod('m:' + it.id, movieUrl(it), r, 0); return true; }
+        const ep = await epP;
+        if (this.bbKey !== key || !ep) return false;
+        previewVod('s:' + it.id, episodeUrl(ep), r, 0);
         return true;
       });
     }
@@ -524,7 +532,7 @@ export class HomeScreen {
   }
 
   destroy() {
-    clearTimeout(this.bbTimer); clearTimeout(this.bbPrevTimer); clearTimeout(this.bbInfoTimer); document.removeEventListener('preview-failed', this.onPvFail);
+    clearTimeout(this.bbTimer); clearTimeout(this.bbPrevTimer); clearTimeout(this.bbInfoTimer); document.removeEventListener('preview-failed', this.onPvFail); document.removeEventListener('preview-ready', this.onPvReady);
     document.removeEventListener('progress-changed', this.onProg); clearTimeout(this.previewTimer); stopPreview(); document.removeEventListener('update-available', this.onUpd); }
 }
 

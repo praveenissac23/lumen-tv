@@ -129,6 +129,7 @@ export function play(url, { rect = null, start = 0, live = true } = {}) {
   video.hidden = false;
   video.src = url;
   video.currentTime = start / 1000;
+  video.onplaying = () => emit('player', { state: 'ready' });
   video.play().catch(() => emit('player', { state: 'error', msg: 'This stream format needs the TV app to play' }));
 }
 export function setRect(rect) {

@@ -48,6 +48,7 @@ N.on('player', (d) => {
   if (d.state !== 'buffering') clearTimeout(P.stallTimer);
   if (d.state === 'ready') {
     status && (status.className = 'pstatus'); P.retried = false; P.liveRetries = 0;
+    if (!P.mode && P.previewCh) document.dispatchEvent(new CustomEvent('preview-ready'));
     if (P.mode === 'vod' && !P.subsTried) {
       P.subsTried = true;
       const it = P.item;
