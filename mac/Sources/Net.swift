@@ -36,6 +36,12 @@ enum Net {
         guard let u = URL(string: url) else { throw URLError(.badURL) }
         var req = URLRequest(url: u)
         req.timeoutInterval = timeout
+        if u.host?.hasSuffix("youtube.com") == true {
+            // trailer search: YouTube answers a browser, in English
+            req.setValue("Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36", forHTTPHeaderField: "User-Agent")
+            req.setValue("en-US,en;q=0.9", forHTTPHeaderField: "Accept-Language")
+            req.setValue("CONSENT=YES+1; SOCS=CAI", forHTTPHeaderField: "Cookie")
+        }
         let (d, r) = try request(req)
         if r.statusCode >= 400 { throw HttpError(code: r.statusCode) }
         return d

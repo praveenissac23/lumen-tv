@@ -658,59 +658,52 @@ html[data-theme="neon"] { --bg: #08050f; --bg-2: #0e0a19; --surface: #171126; --
 #stage[data-wp="theme"] #bg { background: var(--wall); }
 #stage[data-wp="theme"] .bubbles { display: none; }
 
-/* --- focus: big, bright and unmistakable; glides instead of jumping --- */
-.f { transition: transform .26s var(--ease), background-color .18s, box-shadow .26s var(--ease), color .18s; }
-.tile { transition: transform .3s cubic-bezier(.2, .8, .2, 1); }
-.tile::after, .poster-tile .art::before { content: ''; position: absolute; inset: 0; border-radius: inherit; padding: 4px; background: var(--grad); opacity: 0; z-index: 4; pointer-events: none;
-  -webkit-mask: linear-gradient(#000 0 0) content-box, linear-gradient(#000 0 0); -webkit-mask-composite: xor; mask-composite: exclude; transition: opacity .2s; }
+/* --- focus: big, bright and unmistakable. Only transform and opacity ever animate (the GPU does
+   those for free); borders and shadows are drawn once per move, never per frame. --- */
+.f { transition: transform .2s var(--ease); }
+.tile, body.lite .tile { transition: transform .22s cubic-bezier(.2, .8, .2, 1); }
+.tile::after, .poster-tile .art::before { content: ''; position: absolute; inset: 0; border-radius: inherit; border: 4px solid var(--brass); opacity: 0; z-index: 4; pointer-events: none; }
 .poster-tile::after { display: none; }
 .tile:focus::after, .poster-tile:focus .art::before { opacity: 1; }
-.tile:focus, body.lite .tile:focus { transform: scale(1.1); z-index: 3; box-shadow: 0 18px 50px -8px var(--glow), 0 30px 60px rgba(0, 0, 0, .6); }
+.tile:focus, body.lite .tile:focus { transform: scale(1.1); z-index: 3; box-shadow: 0 16px 36px rgba(0, 0, 0, .65); }
 .poster-tile:focus, body.lite .poster-tile:focus { transform: scale(1.1); box-shadow: none; }
-.poster-tile:focus .art { box-shadow: 0 18px 50px -8px var(--glow), 0 30px 60px rgba(0, 0, 0, .6); }
+.poster-tile:focus .art { box-shadow: 0 0 34px -4px var(--glow), 0 16px 36px rgba(0, 0, 0, .65); }
 .poster-tile:focus .pt-cap b { color: #fff; }
-.poster-tile .pt-cap { transition: transform .3s var(--ease); }
 .poster-tile:not(:focus) .pt-cap small { opacity: .75; }
-.ch-tile:focus, .cu-tile:focus, .prog-tile:focus { background: var(--raised); }
+.ch-tile:focus, .cu-tile:focus, .prog-tile:focus { background: var(--raised); box-shadow: 0 0 34px -4px var(--glow), 0 16px 36px rgba(0, 0, 0, .65); }
 .ch-tile:focus .ct-name { color: #fff; }
 .more-tile:focus { border-color: transparent; background: var(--raised); }
 .f:focus .bar i, .bar.over i { background: var(--grad); }
-.search-field:focus { border-color: var(--brass); box-shadow: 0 0 0 2px var(--brass), 0 0 30px -4px var(--glow); }
+.search-field:focus { border-color: var(--brass); box-shadow: 0 0 0 2px var(--brass); }
 .mic-btn:focus { background: var(--grad); }
-.btn.primary:focus, .btn:focus { box-shadow: 0 0 0 3px var(--ring), 0 0 34px -4px var(--glow); }
-.rail-item:focus { box-shadow: 0 0 24px -6px var(--glow); }
-/* rows glide (TV sticks included: transforms are cheap; it's the distance that must look continuous) */
-.row-track, body.lite .row-track { transition: transform .34s cubic-bezier(.25, .8, .25, 1); will-change: transform; }
-.home-track, body.lite .home-track { transition: transform .38s cubic-bezier(.25, .8, .25, 1); will-change: transform; }
-body.lite .vtrack, body.lite .sr-track, body.lite .st-track { transition-duration: .22s; }
-body.lite .f { transition-duration: .2s; }
-.row h2 { transition: color .2s, transform .3s var(--ease); transform-origin: left center; }
+.btn.primary:focus, .btn:focus { box-shadow: 0 0 0 3px var(--ring); }
+/* rows glide: one transform per move, on its own GPU layer */
+.row-track, body.lite .row-track { transition: transform .28s cubic-bezier(.25, .8, .25, 1); will-change: auto; }
+.home-track, body.lite .home-track { transition: transform .32s cubic-bezier(.25, .8, .25, 1); will-change: transform; }
+body.lite .vtrack, body.lite .sr-track, body.lite .st-track { transition-duration: .2s; }
 .row:focus-within h2 { color: #fff; }
-.row:not(:focus-within) h2 { color: var(--text-2); }
 
 /* --- continue watching: posters at the normal size --- */
 .cont-tile .bar.over { left: 12px; right: 12px; bottom: 82px; height: 7px; background: rgba(0, 0, 0, .55); box-shadow: 0 0 0 1px rgba(255, 255, 255, .12); }
 .cont-tile .pt-cap small { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; display: block; }
 
 /* --- billboard home --- */
-.home-bb .bb { position: absolute; left: 0; right: 0; top: 0; height: 600px; z-index: 1; padding: 46px var(--right) 0 56px; }
+.home-bb .bb { position: absolute; left: 0; right: 0; top: 0; height: 556px; z-index: 1; padding: 46px var(--right) 0 56px; }
 .home-bb .home-scroll.bb-rows { top: 556px; z-index: 2; }
 .home-bb .home-scroll.bb-rows .home-track { padding-top: 18px; }
 .home-bb .row { margin-top: 0; margin-bottom: 40px; }
-.home-bb .row:not(:focus-within) { opacity: .82; }
-.home-bb .row { transition: opacity .3s; }
-.bb-bg { position: absolute; inset: 0 0 -40px 0; overflow: hidden; pointer-events: none; }
-.bb-bg::after { content: ''; position: absolute; inset: 0; z-index: 1; background: linear-gradient(90deg, var(--bg) 39%, rgba(0, 0, 0, 0) 66%), linear-gradient(0deg, var(--bg) 6%, rgba(0, 0, 0, 0) 40%), linear-gradient(180deg, rgba(0, 0, 0, .45), rgba(0, 0, 0, 0) 22%); }
+.bb-bg { position: absolute; inset: 0; overflow: hidden; pointer-events: none; }   /* stops where the rows start: nothing see-through over moving rows */
+.bb-bg::after { content: ''; position: absolute; inset: 0; z-index: 1; background: linear-gradient(90deg, var(--bg) 46%, rgba(0, 0, 0, 0) 72%), linear-gradient(0deg, var(--bg) 6%, rgba(0, 0, 0, 0) 40%), linear-gradient(180deg, rgba(0, 0, 0, .45), rgba(0, 0, 0, 0) 22%); }
 
 .bb-art { position: absolute; right: 0; top: 0; width: 1240px; height: 100%; animation: bbFade .5s ease both; }
-.bb-blur { position: absolute; right: 0; top: 0; width: 124px; height: 64px; object-fit: cover; transform-origin: 100% 0; transform: scale(10); filter: blur(3px) saturate(1.4); opacity: .55; }
-.bb-poster { position: absolute; right: 120px; top: 130px; width: 260px; height: 390px; object-fit: cover; border-radius: 16px; box-shadow: 0 30px 80px rgba(0, 0, 0, .7), 0 0 60px -10px var(--glow); z-index: 1; animation: bbPoster .55s cubic-bezier(.2, .8, .2, 1) both; }
+.bb-blur { position: absolute; right: 0; top: 0; width: 124px; height: 64px; object-fit: cover; transform-origin: 100% 0; transform: scale(10); opacity: .5; }
+.bb-poster { position: absolute; right: 120px; top: 130px; width: 260px; height: 390px; object-fit: cover; border-radius: 16px; box-shadow: 0 24px 60px rgba(0, 0, 0, .7); z-index: 1; animation: bbPoster .55s cubic-bezier(.2, .8, .2, 1) both; }
 .bb-art.wide .bb-poster { display: none; }
 .bb-wide { position: absolute; right: 0; top: 0; width: 1240px; height: 100%; object-fit: cover; object-position: center 25%; animation: bbFade .6s ease both; }
 .bb-art.wide .bb-blur { display: none; }
 .bb-glow { position: absolute; right: -200px; top: -200px; width: 1100px; height: 900px; border-radius: 50%; background: radial-gradient(closest-side, var(--la), transparent); opacity: .8; }
-.bb-logo { position: absolute; right: 190px; top: 170px; transform: scale(1.5); transform-origin: center; filter: drop-shadow(0 20px 40px rgba(0, 0, 0, .6)); }
-.bb-video { position: absolute; right: 0; top: 0; width: 1100px; height: 619px; pointer-events: none; }
+.bb-logo { position: absolute; right: 190px; top: 170px; transform: scale(1.5); transform-origin: center; }
+.bb-video { position: absolute; right: 0; top: 0; width: 988px; height: 556px; pointer-events: none; }
 .home-bb.bb-live .bb-art { visibility: hidden; }
 .bb .topbar { position: relative; z-index: 2; }
 .bb-body { position: relative; z-index: 2; margin-top: 46px; max-width: 980px; }
@@ -718,7 +711,7 @@ body.lite .f { transition-duration: .2s; }
 .bb-kicker { display: flex; align-items: center; gap: 12px; font-size: 22px; font-weight: 700; letter-spacing: .12em; text-transform: uppercase; color: var(--brass); margin-bottom: 14px; }
 .bb-kicker .ic { font-size: 24px; }
 .bb-live-dot { width: 12px; height: 12px; border-radius: 50%; background: var(--live); box-shadow: 0 0 0 0 rgba(224, 82, 79, .7); animation: livePulse 1.8s infinite; }
-.bb-title { font-size: 76px; line-height: 1; font-weight: 700; letter-spacing: -.03em; color: #fff; text-shadow: 0 4px 30px rgba(0, 0, 0, .5); margin-bottom: 20px;
+.bb-title { font-size: 76px; line-height: 1; font-weight: 700; letter-spacing: -.03em; color: #fff; margin-bottom: 20px;
   display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; overflow: hidden; }
 .bb-title.long { font-size: 60px; }
 .bb-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 14px; font-size: 26px; color: var(--text-2); margin-bottom: 18px; }
@@ -741,11 +734,11 @@ body.lite .f { transition-duration: .2s; }
 .sw-theme i { width: 46px; height: 64px; border-radius: 6px; background: rgba(255, 255, 255, .1); }
 .sw-theme i:first-child { background: linear-gradient(var(--tbg), var(--tbg)) padding-box, linear-gradient(120deg, var(--ta), var(--tb)) border-box; border: 3px solid transparent; transform: scale(1.1); transform-origin: bottom left; }
 
-.home-bb .topbar-right, .home-bb .bb-title, .home-bb .bb-meta, .home-bb .bb-plot { text-shadow: 0 2px 16px rgba(0, 0, 0, .7); }
+.home-bb .topbar-right, .home-bb .bb-title, .home-bb .bb-meta, .home-bb .bb-plot { text-shadow: 0 2px 6px rgba(0, 0, 0, .7); }
 .bb-poster { z-index: 2; }
 
 /* trailer (YouTube) in the banner: hidden until it is actually playing, then fades in */
-.bb-yt { position: absolute; right: 0; top: 0; width: 1100px; height: 619px; border: 0; z-index: 0; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity .35s, visibility 0s .35s; background: #000; }
+.bb-yt { position: absolute; right: 0; top: 0; width: 988px; height: 556px; border: 0; z-index: 0; pointer-events: none; opacity: 0; visibility: hidden; transition: opacity .35s, visibility 0s .35s; background: #000; }
 .home-bb.bb-trailer .bb-yt { opacity: 1; visibility: visible; transition: opacity .35s; }
 .home-bb.bb-trailer .bb-art { visibility: hidden; }
 .bb-yt { overflow: hidden; }
@@ -759,3 +752,5 @@ body.lite .f { transition-duration: .2s; }
 .trailer-hint b { font-size: 40px; color: #fff; }
 .trailer-hint span { font-size: 22px; color: rgba(255, 255, 255, .75); }
 .trailer-ov.hint .trailer-hint { opacity: 1; }
+
+.btn.busy { opacity: .6; }

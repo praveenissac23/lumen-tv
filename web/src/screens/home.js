@@ -11,19 +11,15 @@ import { prefetchNow, hasProgs } from '../epg.js';
 import { preview, stopPreview, playLive, playVod, playCatchup } from '../player.js';
 import { movieUrl, episodeUrl, seriesInfo } from '../data.js';
 
-import { ytId, ytPageUrl } from '../trailer.js';
+import { ytPageUrl, trailerCandidates } from '../trailer.js';
 
 const CHUNK = 30;   // tiles added to a row at a time
 
-// YouTube trailer of a film or series (looked up once per session; '' when there is none).
-const trailers = new Map();
-function trailerOf(kind, id, known) {
-  if (known) return Promise.resolve(ytId(known));
-  const k = kind + ':' + id;
-  if (!trailers.has(k)) {
-    trailers.set(k, (kind === 'movie' ? vodInfo(id) : seriesInfo(id)).then((i) => ytId(i && i.trailer)).catch(() => { trailers.delete(k); return ''; }));
-  }
-  return trailers.get(k);
+// Trailer candidates for a film or series (provider link, else YouTube search; see trailer.js).
+function trailerOf(kind, id, it) {
+  const item = it || C.byId[kind].get(String(id)) || {};
+  return trailerCandidates(kind + ':' + id, { known: item.yt, name: item.name || item.title || item.seriesName, year: item.year, kind,
+    info: kind === 'movie' ? vodInfo(id) : null });
 }
 
 
@@ -276,7 +272,13 @@ export class HomeScreen {
         clearTimeout(this.ytShowT);
         this.ytShowT = setTimeout(() => { if (this.ytWant === w) this.view.classList.add('bb-trailer'); }, 700);   // a moment for the first frames
       }
-      if ((m.ev === 'ended' || m.ev === 'error') && m.id === this.ytWant.id) this.view.classList.remove('bb-trailer');
+      if (m.ev === 'ended' && m.id === this.ytWant.id) this.view.classList.remove('bb-trailer');
+      // this one can't play outside YouTube: the next candidate
+      if (m.ev === 'error' && m.id === this.ytWant.id) {
+        const w = this.ytWant;
+        this.view.classList.remove('bb-trailer');
+        if (++w.n < w.list.length) { w.id = w.list[w.n]; const f = this.view.querySelector('#bb-yt'); if (f && f.contentWindow) f.contentWindow.postMessage({ cmd: 'play', id: w.id, start: 0 }, '*'); }
+      }
     };
     window.addEventListener('message', this.onYt);
     if (this.layout === 'billboard' && setting('preview') && setting('autoPreview') !== false) this.ytFrame();   // warm up the player now
@@ -349,8 +351,18 @@ export class HomeScreen {
     clearTimeout(this.bbTimer);
     const key = tile ? `${tile.dataset.k}|${tile.dataset.id || tile.dataset.i}|${rowEl && rowEl.dataset.row}` : '';
     if (key === this.bbKey) return;
-    // a short pause so holding an arrow key doesn't redraw it for every tile passed
-    this.bbTimer = setTimeout(() => this.bbShow(tile, rowEl, key), tile ? 90 : 0);
+    // moving on: whatever plays up there stops at once (cheap), but the banner itself is only
+    // redrawn once the remote has been still for a moment, so moving never waits for it
+    clearTimeout(this.bbPrevTimer); clearTimeout(this.bbInfoTimer);
+    this.ytStop();
+    if (this.bbPreviewing) { stopPreview(); this.bbPreviewing = false; this.view.classList.remove('bb-live'); }
+    this.bbKey = '~';
+    const settle = () => {
+      const idle = performance.now() - (window.__lastNav || 0);
+      if (idle < 260) { this.bbTimer = setTimeout(settle, 270 - idle); return; }
+      this.bbShow(tile, rowEl, key);
+    };
+    this.bbTimer = setTimeout(settle, tile ? 140 : 0);
   }
 
   bbItem(tile, rowEl) {
@@ -443,15 +455,15 @@ export class HomeScreen {
       const k = kind === 'cont' || kind === 'rv' ? (String(it.key || '').startsWith('movie:') || it.kind === 'movie' ? 'movie' : 'series') : kind;
       const id = kind === 'cont' || kind === 'rv' ? (k === 'movie' ? String(it.key || '').replace(/^movie:/, '') || it.id : it.seriesId) : it.id;
       if (id && !needsPin(k, it.cat)) {
-        trailerOf(k, id, it.yt).then((yt) => {
-          if (!yt || this.bbKey !== key) return;
+        trailerOf(k, id, kind === 'movie' || kind === 'series' ? it : null).then((list) => {
+          if (!list || !list.length || this.bbKey !== key) return;
           // a short wait so passing over tiles doesn't start trailers; the player itself is already warm
-          this.bbPrevTimer = setTimeout(() => { if (this.bbKey === key) this.ytPlay(yt, key); }, 250);
+          this.bbPrevTimer = setTimeout(() => { if (this.bbKey === key) this.ytPlay(list, key); }, 250);
         });
         // look up the next tiles' trailers too, so they're ready when you get there
         if (tile && rowEl && (kind === 'movie' || kind === 'series')) {
           let n = tile.nextElementSibling;
-          for (let j = 0; j < 2 && n; j++, n = n.nextElementSibling) if (n.dataset.id && n.dataset.k === kind) trailerOf(kind, n.dataset.id, (C.byId[kind].get(n.dataset.id) || {}).yt);
+          for (let j = 0; j < 1 && n; j++, n = n.nextElementSibling) if (n.dataset.id && n.dataset.k === kind) trailerOf(kind, n.dataset.id);
         }
       }
     }
@@ -473,11 +485,11 @@ export class HomeScreen {
     this.view.querySelector('#bb').insertBefore(f, this.view.querySelector('#bb .topbar'));
     return f;
   }
-  ytPlay(id, key) {
+  ytPlay(list, key) {
     const f = this.ytFrame();
     if (!f || !f.contentWindow) return;
-    this.ytWant = { id, key };
-    f.contentWindow.postMessage({ cmd: 'play', id, start: 0 }, '*');
+    this.ytWant = { id: list[0], list, n: 0, key };
+    f.contentWindow.postMessage({ cmd: 'play', id: list[0], start: 0 }, '*');
   }
   ytStop() {
     if (!this.ytWant) return;

@@ -18,7 +18,7 @@ const KEYMAP = {
   ColorF0Red: 'red', ColorF1Green: 'green', ColorF2Yellow: 'yellow', ColorF3Blue: 'blue',
 };
 
-let okDown = 0, okTimer = null, okHeld = false;
+let okDown = 0, okTimer = null, okHeld = false, lastMove = 0;
 
 function dispatch(name, e) {
   for (let i = layers.length - 1; i >= 0; i--) {
@@ -58,6 +58,13 @@ export function initInput() {
       clearTimeout(okTimer);
       okTimer = setTimeout(() => { okHeld = true; dispatch('hold', e); }, 650);
       return;
+    }
+    if (name === 'up' || name === 'down' || name === 'left' || name === 'right') {
+      const t = performance.now();
+      // Holding an arrow: move at a steady pace the animation can follow (about 9 steps a second)
+      // instead of every repeat the remote fires, which piles up and looks stuck.
+      if (e.repeat && t - lastMove < 105) return;
+      lastMove = t; window.__lastNav = t;
     }
     dispatch(name, e);
   }, true);
@@ -147,6 +154,7 @@ export function focus(elm, { noScroll = false } = {}) {
   elm.focus({ preventScroll: true });
   const g = elm.closest('[data-group]');
   if (g) g._last = elm;
+  if (elm.parentElement && elm.parentElement.parentElement && elm.parentElement.parentElement.dataset.scroll === 'x') elm.parentElement._last = elm;
   if (!noScroll) reveal(elm);
   if (prev !== elm) elm.dispatchEvent(new CustomEvent('focused', { bubbles: true }));
 }
@@ -182,6 +190,34 @@ export function move(dir, root) {
     // End of a row: stay put (never jump to a tile in another row).
     if (dir === 'right') { cur.dispatchEvent(new CustomEvent('edge', { bubbles: true, detail: dir })); return true; }
     xRow = cur.parentElement.parentElement;
+  }
+  // Fast path: up/down from a tile in a row goes to the row above/below (its last-used tile, else
+  // the tile in the same column) without measuring the whole screen.
+  if ((dir === 'up' || dir === 'down') && !xRow && cur.parentElement && cur.parentElement.parentElement &&
+      cur.parentElement.parentElement.dataset.scroll === 'x') {
+    const clip = cur.parentElement.parentElement;
+    const host = clip.parentElement && clip.parentElement.closest('[data-scroll="y"]');
+    if (host) {
+      const rows = host.querySelectorAll('[data-scroll="x"]');
+      let i = Array.prototype.indexOf.call(rows, clip);
+      for (i += dir === 'down' ? 1 : -1; i >= 0 && i < rows.length; i += dir === 'down' ? 1 : -1) {
+        const track = rows[i].firstElementChild;
+        if (!track || !track.querySelector('.f')) continue;
+        let t = track._last && track._last.isConnected && track._last.parentElement === track ? track._last : null;
+        if (!t) {
+          // the tile nearest the same spot on screen
+          const ax0 = cur.getBoundingClientRect().left;
+          let bestD = Infinity;
+          for (const el of track.children) {
+            if (!el.classList.contains('f')) continue;
+            const d = Math.abs(el.getBoundingClientRect().left - ax0);
+            if (d < bestD) { bestD = d; t = el; } else if (t) break;
+          }
+        }
+        if (t) { focus(t); return true; }
+      }
+      if (dir === 'down') return true;   // last row: stay
+    }
   }
   const scope = cur.closest('[data-trap]') || root;
   const a = cur.getBoundingClientRect();

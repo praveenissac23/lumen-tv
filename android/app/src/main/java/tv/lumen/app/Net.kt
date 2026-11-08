@@ -22,7 +22,12 @@ object Net {
             c.instanceFollowRedirects = false
             c.connectTimeout = minOf(timeoutMs, 15000)
             c.readTimeout = timeoutMs
-            c.setRequestProperty("User-Agent", PlayerHost.USER_AGENT)
+            if (c.url.host.endsWith("youtube.com")) {
+                // trailer search: YouTube answers a browser, in English
+                c.setRequestProperty("User-Agent", "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36")
+                c.setRequestProperty("Accept-Language", "en-US,en;q=0.9")
+                c.setRequestProperty("Cookie", "CONSENT=YES+1; SOCS=CAI")
+            } else c.setRequestProperty("User-Agent", PlayerHost.USER_AGENT)
             c.setRequestProperty("Accept-Encoding", "gzip")
             val code = c.responseCode
             if (code in 300..399) {

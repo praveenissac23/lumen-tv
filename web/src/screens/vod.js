@@ -7,7 +7,7 @@ import { icon, poster, stars, progressBar, VList, VGrid, toast } from '../ui.js'
 import { playVod } from '../player.js';
 import { langCatEntries } from '../languages.js';
 import { itemActions, download } from '../actions.js';
-import { playTrailer } from '../trailer.js';
+import { playTrailer, trailerCandidates } from '../trailer.js';
 
 const SORTS = [['added', 'Recently added'], ['name', 'A to Z'], ['rating', 'Top rated'], ['year', 'Newest']];
 
@@ -253,8 +253,11 @@ export class DetailScreen {
     } else if (a === 'more') {
       itemActions('movie', it, this.app).then((c) => c && this.app.reload());
     } else if (a === 'trailer') {
-      if (!this.trailer && !it.yt) await this.infoP;
-      playTrailer(this.trailer || it.yt, it.name);
+      const b = this.view.querySelector('[data-a="trailer"]');
+      b.classList.add('busy');
+      const list = await trailerCandidates(this.kind + ':' + it.id, { known: this.trailer || it.yt, name: it.name, year: it.year, kind: this.kind, info: this.infoP });
+      b.classList.remove('busy');
+      playTrailer(list, it.name);
     } else if (a === 'fav') {
       const on = toggleFav(this.kind, it.id);
       const b = this.view.querySelector('[data-a="fav"]');
