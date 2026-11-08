@@ -35,7 +35,7 @@ export function playTrailer(trailer, title = '') {
     if (!m || !m.yt || e.source !== f.contentWindow) return;
     if (m.ev === 'ready') send({ cmd: 'play', id, start: 0 });
     // uncover once it has been playing long enough for YouTube's start-up buttons to go
-    if (m.ev === 'playing' && !ov.classList.contains('on')) setTimeout(() => ov.classList.add('on'), 2200);
+    if (m.ev === 'playing' && !ov.classList.contains('on')) setTimeout(() => ov.classList.add('on'), 600);
     if (m.ev === 'ended') closeTrailer();
     if (m.ev === 'error') { closeTrailer(); toast("This trailer can't be played"); }
   };

@@ -99,6 +99,13 @@ class MainActivity : Activity() {
             userAgentString = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) $chrome Safari/537.36"
         }
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
+        // Inside YouTube's trailer frame, hide YouTube's own buttons and lines (see web/yt-clean.js)
+        if (androidx.webkit.WebViewFeature.isFeatureSupported(androidx.webkit.WebViewFeature.DOCUMENT_START_SCRIPT)) {
+            try {
+                val js = assets.open("web/yt-clean.js").bufferedReader().use { it.readText() }
+                androidx.webkit.WebViewCompat.addDocumentStartJavaScript(w, js, setOf("https://www.youtube.com", "https://www.youtube-nocookie.com"))
+            } catch (e: Exception) { /* trailers still play, just with YouTube's buttons */ }
+        }
         w.webViewClient = object : WebViewClient() {
             @Deprecated("Deprecated in Java")
             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean = true // never navigate away

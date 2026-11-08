@@ -73,6 +73,10 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
         let shim = (try? String(contentsOf: Bundle.main.url(forResource: "shim", withExtension: "js")!, encoding: .utf8)) ?? ""
         cfg.userContentController.addUserScript(WKUserScript(source: shim.replacingOccurrences(of: "__TOKEN__", with: token),
                                                              injectionTime: .atDocumentStart, forMainFrameOnly: true))
+        // Inside YouTube's trailer frame, hide YouTube's own buttons and lines
+        if let clean = try? String(contentsOf: App.webRoot.appendingPathComponent("yt-clean.js"), encoding: .utf8) {
+            cfg.userContentController.addUserScript(WKUserScript(source: clean, injectionTime: .atDocumentStart, forMainFrameOnly: false))
+        }
         cfg.mediaTypesRequiringUserActionForPlayback = []
         cfg.preferences.setValue(true, forKey: "developerExtrasEnabled")
         web = WKWebView(frame: frame, configuration: cfg)

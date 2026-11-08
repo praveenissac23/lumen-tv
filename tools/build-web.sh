@@ -6,7 +6,7 @@ OUT="$ROOT/build/web"
 rm -rf "$OUT" && mkdir -p "$OUT/fonts"
 npx --prefix "$ROOT" esbuild "$ROOT/web/src/app.js" --bundle --format=iife --target=chrome69 --minify --legal-comments=none --outfile="$OUT/app.js"
 npx --prefix "$ROOT" esbuild "$ROOT/web/app.css" --minify --target=chrome80 --outfile="$OUT/app.css" --log-level=warning
-cp "$ROOT/web/index.html" "$ROOT/web/yt.html" "$OUT/"
+cp "$ROOT/web/index.html" "$ROOT/web/yt.html" "$ROOT/web/yt-clean.js" "$OUT/"
 cp "$ROOT"/web/fonts/*.woff2 "$OUT/fonts/"
 cp "$ROOT/assets/demo.mp4" "$OUT/"
 ASSETS="$ROOT/android/app/src/main/assets/web"
