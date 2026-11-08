@@ -276,7 +276,7 @@ export class HomeScreen {
       if (m.ev === 'playing' && m.id === this.ytWant.id && this.bbKey === this.ytWant.key) {
         const w = this.ytWant;
         clearTimeout(this.ytShowT);
-        this.ytShowT = setTimeout(() => { if (this.ytWant === w) this.view.classList.add('bb-trailer'); }, 500);
+        this.ytShowT = setTimeout(() => { if (this.ytWant === w) this.view.classList.add('bb-trailer'); }, 2600);   // YouTube hides its start-up buttons after ~2.5 s
       }
       if ((m.ev === 'ended' || m.ev === 'error') && m.id === this.ytWant.id) this.view.classList.remove('bb-trailer');
     };
