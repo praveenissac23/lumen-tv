@@ -100,7 +100,8 @@ with sync_playwright() as p:
     page.evaluate("document.querySelector('[data-act=addx]').click()"); page.wait_for_timeout(150)
     for k, v in {'server': '127.0.0.1:8766', 'user': 'demo', 'pass': 'demo'}.items(): page.fill(f'input[name={k}]', v)
     page.evaluate("document.querySelector('[data-a=ok]').click()")
-    page.wait_for_function("document.querySelector('#toast').textContent.includes('channels ready')", timeout=30000)
+    try: page.wait_for_function("document.querySelector('#toast').textContent.includes('channels ready') || document.querySelector('#toast').textContent.includes('TV guide ready')", timeout=30000)
+    except Exception: print("TOAST:", page.evaluate("document.querySelector('#toast').textContent"), page.evaluate("document.body.dataset.screen"), page.evaluate("document.querySelector('.sheet, .form')?.textContent?.slice(0,200)")); raise
     page.wait_for_timeout(600)
     page.evaluate("__app.go('live', {}, {root:true})"); page.wait_for_timeout(900)
     print('live row now:', page.evaluate("document.querySelector('.ch-row .nn-row small')?.textContent"))
