@@ -17,7 +17,7 @@ export class SearchScreen {
     this.app = app; this.view = view; this.params = params;
     this.q = params.restore?.q ?? params.q ?? '';
     view.innerHTML = `<div class="sr">
-      <aside class="sr-kb">
+      <aside class="sr-kb" data-zone="srkb">
         <div class="sr-box">${icon('search')}<input class="sr-input" id="sr-input" value="${esc(this.q)}" placeholder="Search" autocomplete="off" spellcheck="false" readonly inputmode="none" tabindex="-1">
           <button class="f mic-btn sm" id="sr-mic" aria-label="Voice search">${icon('mic')}</button></div>
         <div class="kb" data-group="kb">${KEYS.map((k) => `<button class="f key" data-key="${k}">${k}</button>`).join('')}
@@ -25,7 +25,7 @@ export class SearchScreen {
         <button class="f dictate" id="sr-dictate">${icon('mic')}<span>Speak or type</span><small>${window.__desktop ? 'Type on your keyboard, or press the dictation key (or Fn twice) and speak.' : 'Opens the TV keyboard. Hold the Alexa (mic) button and speak, then press Search.'}</small></button>
         <div class="sr-sugg" id="sr-sugg" data-group="sugg"></div>
       </aside>
-      <section class="sr-results"><div class="sr-scroll" data-scroll="y" data-pad="0"><div class="sr-track" id="sr-track"></div></div></section>
+      <section class="sr-results" data-zone="srres"><div class="sr-scroll" data-scroll="y" data-pad="0"><div class="sr-track" id="sr-track"></div></div></section>
     </div>`;
     this.input = view.querySelector('#sr-input');
     this.run = debounce(() => this.paint(), 120);
@@ -86,7 +86,7 @@ export class SearchScreen {
     const t = now();
     const best = r.best;
     const row = (title, items, render, key) => items.length ? `<section class="sr-sec"><h2>${title}<small>${items.length}</small></h2>
-      <div class="row-clip" data-scroll="x" data-pad="72"><div class="row-track" data-group="r-${key}">${items.map(render).join('')}</div></div></section>` : '';
+      <div class="row-clip" data-scroll="x" data-pad="40" data-anchor="start"><div class="row-track" data-group="r-${key}">${items.map(render).join('')}</div></div></section>` : '';
     let html = `<p class="sr-count" id="sr-count">${this.params.voice && q === (this.params.q || '').trim() ? `You said “${esc(this.params.q)}”. ` : ''}${r.total ? `${r.total} results in ${Math.max(1, Math.round(r.ms))} ms` : 'Searching the guide…'}</p>`;
     if (best) html += `<section class="sr-sec sr-best" data-group="best">${this.bestCard(best, t)}</section>`;
     html += row('Channels', r.live, (ch, i) => this.chTile(ch, i), 'live');

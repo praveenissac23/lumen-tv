@@ -15,11 +15,16 @@ function load(w) {
 window.onYouTubeIframeAPIReady = function () {
   player = new YT.Player('p', {
     width: '100%', height: '100%',
-    playerVars: { autoplay: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3, rel: 0, playsinline: 1, cc_load_policy: 0, showinfo: 0, modestbranding: 1, autohide: 1, enablejsapi: 1, origin: location.origin },
+    playerVars: { autoplay: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3, rel: 0, playsinline: 1, cc_load_policy: 1, cc_lang_pref: 'en', hl: 'en', showinfo: 0, vq: 'hd1080', modestbranding: 1, autohide: 1, enablejsapi: 1, origin: location.origin },
     events: {
       onReady: function () { ready = true; tell({ ev: 'ready' }); if (want) load(want); },
       onStateChange: function (e) {
-        if (e.data === 1) tell({ ev: 'playing', id: cur });
+        if (e.data === 1) {
+          // English subtitles when the trailer has them, and the sharpest picture YouTube will give
+          try { player.loadModule('captions'); player.setOption('captions', 'track', { languageCode: 'en' }); } catch (x) {}
+          try { var q = player.getAvailableQualityLevels() || []; if (q.length) player.setPlaybackQuality(q[0]); } catch (x) {}
+          tell({ ev: 'playing', id: cur });
+        }
         if (e.data === 0) tell({ ev: 'ended', id: cur });
       },
       onError: function (e) { tell({ ev: 'error', id: cur, code: e.data }); },

@@ -207,8 +207,11 @@ export function move(dir, root) {
   let best = null, bestScore = Infinity;
   if (dir === 'up' || dir === 'down') {
     // Vertical moves go to the nearest row first, then the closest item within it.
-    const nearest = Math.min(Infinity, ...cands.map((c) => c.main));
-    for (const c of cands) {
+    // Things straight above/below come first; only if there are none, look sideways.
+    const inBeam = cands.filter((c) => c.beam);
+    const pool = inBeam.length ? inBeam : cands;
+    const nearest = Math.min(Infinity, ...pool.map((c) => c.main));
+    for (const c of pool) {
       if (c.main > nearest + 48) continue;
       const s = c.cross * (c.beam ? 0.3 : 1);
       if (s < bestScore) { bestScore = s; best = c.el; }
