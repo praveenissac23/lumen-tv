@@ -93,6 +93,10 @@ class MainActivity : Activity() {
             displayZoomControls = false
             textZoom = 100
             mixedContentMode = WebSettings.MIXED_CONTENT_ALWAYS_ALLOW
+            // Present as desktop Chrome: on a phone/TV user agent YouTube's player draws its own
+            // play/pause buttons over the trailer even with controls switched off.
+            val chrome = Regex("Chrome/[0-9.]+").find(userAgentString ?: "")?.value ?: "Chrome/120.0.0.0"
+            userAgentString = "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) $chrome Safari/537.36"
         }
         WebView.setWebContentsDebuggingEnabled(BuildConfig.DEBUG)
         w.webViewClient = object : WebViewClient() {

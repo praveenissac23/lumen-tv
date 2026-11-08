@@ -272,7 +272,12 @@ export class HomeScreen {
     this.onYt = (e) => {
       const m = e.data;
       if (!m || !m.yt || !this.ytWant) return;
-      if (m.ev === 'playing' && m.id === this.ytWant.id && this.bbKey === this.ytWant.key) this.view.classList.add('bb-trailer');
+      // shown a moment after it starts, once the player's start-up overlay has gone
+      if (m.ev === 'playing' && m.id === this.ytWant.id && this.bbKey === this.ytWant.key) {
+        const w = this.ytWant;
+        clearTimeout(this.ytShowT);
+        this.ytShowT = setTimeout(() => { if (this.ytWant === w) this.view.classList.add('bb-trailer'); }, 500);
+      }
       if ((m.ev === 'ended' || m.ev === 'error') && m.id === this.ytWant.id) this.view.classList.remove('bb-trailer');
     };
     window.addEventListener('message', this.onYt);
