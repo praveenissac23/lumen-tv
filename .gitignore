@@ -1,4 +1,4 @@
-node_modules/
+node_modules
 build/
 android/.gradle/
 android/app/build/
@@ -15,4 +15,4 @@ mac/vendor/
 mac/build/
 mac/build.log
 mac/errors.txt
-node_modules/
+node_modules
