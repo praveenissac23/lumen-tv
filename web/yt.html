@@ -29,6 +29,8 @@ window.onYouTubeIframeAPIReady = function () {
 addEventListener('message', function (e) {
   var m = e.data || {};
   if (m.cmd === 'play') { want = m; if (ready) load(m); }
+  else if (m.cmd === 'toggle') { if (ready) try { player.getPlayerState() === 1 ? player.pauseVideo() : player.playVideo(); } catch (x) {} }
+  else if (m.cmd === 'seek') { if (ready) try { player.seekTo(Math.max(0, player.getCurrentTime() + m.by), true); } catch (x) {} }
   else if (m.cmd === 'stop') { want = null; cur = null; if (ready) try { player.stopVideo(); } catch (x) {} }
 });
 </script>

@@ -11,14 +11,12 @@ import { prefetchNow, hasProgs } from '../epg.js';
 import { preview, stopPreview, playLive, playVod, playCatchup } from '../player.js';
 import { movieUrl, episodeUrl, seriesInfo } from '../data.js';
 
+import { ytId, ytPageUrl } from '../trailer.js';
+
 const CHUNK = 30;   // tiles added to a row at a time
 
 // YouTube trailer of a film or series (looked up once per session; '' when there is none).
 const trailers = new Map();
-function ytId(v) {
-  const m = String(v || '').trim().match(/(?:v=|youtu\.be\/|embed\/|shorts\/)?([A-Za-z0-9_-]{11})(?:[?&#]|$)/);
-  return m ? m[1] : '';
-}
 function trailerOf(kind, id, known) {
   if (known) return Promise.resolve(ytId(known));
   const k = kind + ':' + id;
@@ -471,7 +469,7 @@ export class HomeScreen {
     f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
     f.tabIndex = -1;
     // Android loads the app from a file, which YouTube won't play under; give it a web address
-    f.src = location.protocol === 'file:' ? 'https://thumb.lumen/yt.html' : 'yt.html';
+    f.src = ytPageUrl();
     this.view.querySelector('#bb').insertBefore(f, this.view.querySelector('#bb .topbar'));
     return f;
   }

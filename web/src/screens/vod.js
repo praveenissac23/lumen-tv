@@ -7,7 +7,7 @@ import { icon, poster, stars, progressBar, VList, VGrid, toast } from '../ui.js'
 import { playVod } from '../player.js';
 import { langCatEntries } from '../languages.js';
 import { itemActions, download } from '../actions.js';
-import { openUrl } from '../native.js';
+import { playTrailer } from '../trailer.js';
 
 const SORTS = [['added', 'Recently added'], ['name', 'A to Z'], ['rating', 'Top rated'], ['year', 'Newest']];
 
@@ -121,8 +121,9 @@ export class DetailScreen {
     if (!this.item) { view.innerHTML = '<div class="empty"><h2>This title is no longer in your playlist</h2></div>'; return; }
     this.season = params.restore?.season || null;
     this.render();
-    if (this.kind === 'movie') vodInfo(this.item.id).then((i) => i && this.fill(i)).catch(() => {});
-    else seriesInfo(this.item.id).then((i) => { this.info = i; this.fill(i); this.paintSeasons(); }).catch(() => this.paintSeasons());
+    this.infoP = this.kind === 'movie'
+      ? vodInfo(this.item.id).then((i) => { if (i) this.fill(i); return i; }).catch(() => null)
+      : seriesInfo(this.item.id).then((i) => { this.info = i; this.fill(i); this.paintSeasons(); return i; }).catch(() => { this.paintSeasons(); return null; });
   }
 
   render() {
@@ -142,8 +143,8 @@ export class DetailScreen {
             ${this.kind === 'movie' ? (pr
               ? `<button class="f btn primary" data-a="resume">${icon('play')}Resume from ${duration(pr.pos / 1000)}</button><button class="f btn" data-a="play">${icon('history')}Start from the beginning</button>`
               : `<button class="f btn primary" data-a="play">${icon('play')}Play</button>`) : `<button class="f btn primary" data-a="next">${icon('play')}<span id="dt-nextlabel">Play</span></button>`}
+            <button class="f btn trailer-btn" data-a="trailer">${icon('film')}Trailer</button>
             ${this.kind === 'movie' ? `<button class="f btn" data-a="download">${icon('download')}Download</button>` : ''}
-            <button class="f btn" data-a="trailer" hidden>${icon('play')}Trailer</button>
             <button class="f btn icon-only" data-a="fav" aria-label="Favourite">${icon(isFav(this.kind, it.id) ? 'heartFill' : 'heart')}</button>
             ${this.kind === 'movie' ? `<button class="f btn icon-only" data-a="more" aria-label="More">${icon('more')}</button>` : ''}
           </div>
@@ -159,7 +160,7 @@ export class DetailScreen {
 
   fill(i) {
     const q = (s) => this.view.querySelector(s);
-    if (i.trailer) { this.trailer = i.trailer; q('[data-a="trailer"]').hidden = false; }
+    if (i.trailer) this.trailer = i.trailer;
     if (i.height && q('#dt-dur')) q('#dt-dur').textContent = [i.dur, i.height >= 2000 ? '4K' : i.height >= 1000 ? '1080p' : i.height >= 700 ? '720p' : ''].filter(Boolean).join(' \u00b7 ');
     if (i.plot && q('#dt-plot')) q('#dt-plot').textContent = i.plot;
     if (i.genre && q('#dt-genre')) q('#dt-genre').textContent = i.genre;
@@ -252,7 +253,8 @@ export class DetailScreen {
     } else if (a === 'more') {
       itemActions('movie', it, this.app).then((c) => c && this.app.reload());
     } else if (a === 'trailer') {
-      openUrl(/^https?:/.test(this.trailer) ? this.trailer : 'https://www.youtube.com/watch?v=' + this.trailer);
+      if (!this.trailer && !it.yt) await this.infoP;
+      playTrailer(this.trailer || it.yt, it.name);
     } else if (a === 'fav') {
       const on = toggleFav(this.kind, it.id);
       const b = this.view.querySelector('[data-a="fav"]');
