@@ -142,8 +142,8 @@ async function fetchList(pl, action, kind) {
 
 const XF = {
   live: { stream_id: 'id', num: 'num', name: 'name', category_id: 'cat', stream_icon: 'logo', epg_channel_id: 'epg', tv_archive: 'arch', tv_archive_duration: 'archDays' },
-  movie: { stream_id: 'id', name: 'name', category_id: 'cat', stream_icon: 'img', rating_5based: 'r5', rating: 'r', year: 'year', releaseDate: 'date', added: 'added', container_extension: 'ext' },
-  series: { series_id: 'id', name: 'name', category_id: 'cat', cover: 'img', rating_5based: 'r5', releaseDate: 'date', release_date: 'date', last_modified: 'added', plot: 'plot', genre: 'genre' },
+  movie: { stream_id: 'id', name: 'name', category_id: 'cat', stream_icon: 'img', rating_5based: 'r5', rating: 'r', year: 'year', releaseDate: 'date', added: 'added', container_extension: 'ext', youtube_trailer: 'yt' },
+  series: { series_id: 'id', name: 'name', category_id: 'cat', cover: 'img', rating_5based: 'r5', releaseDate: 'date', release_date: 'date', last_modified: 'added', plot: 'plot', genre: 'genre', youtube_trailer: 'yt' },
 };
 function compactXtream(o, kind) {
   const out = {};
@@ -222,7 +222,7 @@ export async function seriesInfo(id) {
       plot: e.info?.plot || '', dur: e.info?.duration || '', img: e.info?.movie_image || '',
     }));
   }
-  return { plot: r.info?.plot || '', cast: r.info?.cast || '', genre: r.info?.genre || '', backdrop: (r.info?.backdrop_path || [])[0] || '', seasons };
+  return { plot: r.info?.plot || '', cast: r.info?.cast || '', genre: r.info?.genre || '', backdrop: (r.info?.backdrop_path || [])[0] || '', trailer: r.info?.youtube_trailer || '', seasons };
 }
 
 // ---------- M3U ----------

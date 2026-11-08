@@ -212,9 +212,9 @@ enum Catalog {
         "live": ["stream_id": "id", "num": "num", "name": "name", "category_id": "cat", "stream_icon": "logo",
                  "epg_channel_id": "epg", "tv_archive": "arch", "tv_archive_duration": "archDays"],
         "movie": ["stream_id": "id", "name": "name", "category_id": "cat", "stream_icon": "img", "rating_5based": "r5",
-                  "rating": "r", "year": "year", "releaseDate": "date", "added": "added", "container_extension": "ext"],
+                  "rating": "r", "year": "year", "releaseDate": "date", "added": "added", "container_extension": "ext", "youtube_trailer": "yt"],
         "series": ["series_id": "id", "name": "name", "category_id": "cat", "cover": "img", "rating_5based": "r5",
-                   "releaseDate": "date", "release_date": "date", "last_modified": "added", "plot": "plot", "genre": "genre"],
+                   "releaseDate": "date", "release_date": "date", "last_modified": "added", "plot": "plot", "genre": "genre", "youtube_trailer": "yt"],
     ]
 
     static func fetch(url: String, kind: String, dest: URL) throws -> Int {

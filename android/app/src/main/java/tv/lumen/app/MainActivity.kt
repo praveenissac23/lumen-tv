@@ -98,10 +98,16 @@ class MainActivity : Activity() {
         w.webViewClient = object : WebViewClient() {
             @Deprecated("Deprecated in Java")
             override fun shouldOverrideUrlLoading(view: WebView?, url: String?): Boolean = true // never navigate away
+            // ...but let the trailer frame (YouTube's player) load what it needs
+            override fun shouldOverrideUrlLoading(view: WebView?, request: WebResourceRequest?): Boolean = request?.isForMainFrame != false
 
             // Logos and posters are downscaled natively (see Thumbs)
             override fun shouldInterceptRequest(view: WebView?, request: WebResourceRequest?): WebResourceResponse? {
                 val u = request?.url ?: return null
+                if (u.host == "thumb.lumen" && u.path == "/yt.html") {
+                    // the trailer page needs a real web address (YouTube refuses players from file pages)
+                    return try { WebResourceResponse("text/html", "utf-8", assets.open("web/yt.html")) } catch (e: Exception) { null }
+                }
                 if (u.host == "thumb.lumen") {
                     val src = u.getQueryParameter("u") ?: return null
                     val width = u.getQueryParameter("w")?.toIntOrNull() ?: 320

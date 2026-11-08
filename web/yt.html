@@ -1,0 +1,36 @@
+<!doctype html>
+<html><head><meta charset="utf-8"><meta name="referrer" content="strict-origin-when-cross-origin">
+<style>html,body{margin:0;height:100%;background:#000;overflow:hidden}#p{position:absolute;inset:0;width:100%;height:100%;border:0}</style></head>
+<body><div id="p"></div>
+<script>
+// Trailer player for the home banner: the official YouTube player, loaded once and kept warm,
+// so each trailer only has to fetch the video itself. Talks to the app with postMessage.
+var player = null, ready = false, want = null, cur = null;
+function tell(m) { m.yt = 1; parent.postMessage(m, '*'); }
+function load(w) {
+  cur = w.id;
+  try { player.unMute(); player.setVolume(w.vol == null ? 100 : w.vol); } catch (e) {}
+  player.loadVideoById({ videoId: w.id, startSeconds: w.start || 0, suggestedQuality: 'hd1080' });
+}
+window.onYouTubeIframeAPIReady = function () {
+  player = new YT.Player('p', {
+    width: '100%', height: '100%',
+    playerVars: { autoplay: 1, controls: 0, disablekb: 1, fs: 0, iv_load_policy: 3, rel: 0, playsinline: 1, cc_load_policy: 0, origin: location.origin },
+    events: {
+      onReady: function () { ready = true; tell({ ev: 'ready' }); if (want) load(want); },
+      onStateChange: function (e) {
+        if (e.data === 1) tell({ ev: 'playing', id: cur });
+        if (e.data === 0) tell({ ev: 'ended', id: cur });
+      },
+      onError: function (e) { tell({ ev: 'error', id: cur, code: e.data }); },
+    },
+  });
+};
+addEventListener('message', function (e) {
+  var m = e.data || {};
+  if (m.cmd === 'play') { want = m; if (ready) load(m); }
+  else if (m.cmd === 'stop') { want = null; cur = null; if (ready) try { player.stopVideo(); } catch (x) {} }
+});
+</script>
+<script src="https://www.youtube.com/iframe_api"></script>
+</body></html>

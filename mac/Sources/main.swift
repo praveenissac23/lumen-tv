@@ -125,6 +125,7 @@ final class App: NSObject, NSApplicationDelegate, WKNavigationDelegate, WKUIDele
     // Only our own pages load in the window; anything else opens in the browser.
     func webView(_ webView: WKWebView, decidePolicyFor action: WKNavigationAction, decisionHandler: @escaping (WKNavigationActionPolicy) -> Void) {
         if let u = action.request.url, u.host == "127.0.0.1" || u.scheme == "about" { decisionHandler(.allow); return }
+        if let f = action.targetFrame, !f.isMainFrame { decisionHandler(.allow); return }   // the trailer frame (YouTube)
         if let u = action.request.url { NSWorkspace.shared.open(u) }
         decisionHandler(.cancel)
     }

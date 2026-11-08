@@ -19,11 +19,11 @@ object Catalog {
     )
     private val MOVIE = mapOf(
         "stream_id" to "id", "name" to "name", "category_id" to "cat", "stream_icon" to "img",
-        "rating_5based" to "r5", "rating" to "r", "year" to "year", "releaseDate" to "date", "added" to "added", "container_extension" to "ext",
+        "rating_5based" to "r5", "rating" to "r", "year" to "year", "releaseDate" to "date", "added" to "added", "container_extension" to "ext", "youtube_trailer" to "yt",
     )
     private val SERIES = mapOf(
         "series_id" to "id", "name" to "name", "category_id" to "cat", "cover" to "img", "rating_5based" to "r5",
-        "releaseDate" to "date", "release_date" to "date", "last_modified" to "added", "plot" to "plot", "genre" to "genre",
+        "releaseDate" to "date", "release_date" to "date", "last_modified" to "added", "plot" to "plot", "genre" to "genre", "youtube_trailer" to "yt",
     )
 
     /** Returns the number of items written. */

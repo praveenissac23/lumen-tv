@@ -8,22 +8,26 @@ import { esc, hhmm, now, minutesLeft, tint } from '../util.js';
 import { focus, reveal } from '../nav.js';
 import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots, imgUrl } from '../ui.js';
 import { prefetchNow, hasProgs } from '../epg.js';
-import { preview, previewVod, stopPreview, playLive, playVod, playCatchup } from '../player.js';
+import { preview, stopPreview, playLive, playVod, playCatchup } from '../player.js';
 import { movieUrl, episodeUrl, seriesInfo } from '../data.js';
 
 const CHUNK = 30;   // tiles added to a row at a time
 
-// First episode of a series, for the banner preview (kept for the session).
-const firstEps = new Map();
-function seriesFirstEp(id) {
-  if (!firstEps.has(id)) {
-    firstEps.set(id, seriesInfo(id).then((si) => {
-      const sn = Object.keys((si && si.seasons) || {}).sort((a, b) => a - b)[0];
-      return (sn && si.seasons[sn][0]) || null;
-    }).catch(() => { firstEps.delete(id); return null; }));
-  }
-  return firstEps.get(id);
+// YouTube trailer of a film or series (looked up once per session; '' when there is none).
+const trailers = new Map();
+function ytId(v) {
+  const m = String(v || '').trim().match(/(?:v=|youtu\.be\/|embed\/|shorts\/)?([A-Za-z0-9_-]{11})(?:[?&#]|$)/);
+  return m ? m[1] : '';
 }
+function trailerOf(kind, id, known) {
+  if (known) return Promise.resolve(ytId(known));
+  const k = kind + ':' + id;
+  if (!trailers.has(k)) {
+    trailers.set(k, (kind === 'movie' ? vodInfo(id) : seriesInfo(id)).then((i) => ytId(i && i.trailer)).catch(() => { trailers.delete(k); return ''; }));
+  }
+  return trailers.get(k);
+}
+
 
 // Newest-first lists, sorted once per catalogue load (sorting 50,000 films on every visit is slow on a TV stick).
 const sorted = new Map();
@@ -265,6 +269,14 @@ export class HomeScreen {
     document.addEventListener('preview-failed', this.onPvFail);
     this.onPvReady = () => { if (this.bbPreviewing) this.view.classList.add('bb-live'); };
     document.addEventListener('preview-ready', this.onPvReady);
+    this.onYt = (e) => {
+      const m = e.data;
+      if (!m || !m.yt || !this.ytWant) return;
+      if (m.ev === 'playing' && m.id === this.ytWant.id && this.bbKey === this.ytWant.key) this.view.classList.add('bb-trailer');
+      if ((m.ev === 'ended' || m.ev === 'error') && m.id === this.ytWant.id) this.view.classList.remove('bb-trailer');
+    };
+    window.addEventListener('message', this.onYt);
+    if (this.layout === 'billboard' && setting('preview') && setting('autoPreview') !== false) this.ytFrame();   // warm up the player now
   }
 
   // A language's films or series: only the categories chosen in Settings > Languages,
@@ -357,6 +369,7 @@ export class HomeScreen {
     this.bbKey = key;
     clearTimeout(this.bbPrevTimer); clearTimeout(this.bbInfoTimer);
     if (this.bbPreviewing) { stopPreview(); this.bbPreviewing = false; this.view.classList.remove('bb-live'); }
+    this.ytStop();
     const x = this.bbItem(tile, rowEl);
     if (!x || (!x.it && x.kind !== 'more')) { box.innerHTML = ''; bg.innerHTML = ''; return; }
     const { kind, it, row } = x;
@@ -411,8 +424,6 @@ export class HomeScreen {
       }, 450);
     }
     const auto = setting('preview') && setting('autoPreview') !== false;
-    // series: look up the first episode straight away (cached), so the preview can start at once
-    const epP = auto && kind === 'series' && it ? seriesFirstEp(it.id) : null;
     const playIn = (fn) => {
       this.bbPrevTimer = setTimeout(async () => {
         if (this.bbKey !== key || !this.app.current() || this.app.current().ctl !== this) return;
@@ -422,21 +433,55 @@ export class HomeScreen {
         try { if (await fn(r) === false || this.bbKey !== key) return; } catch (e) { return; }
         // the picture stays until the video actually shows, so there's never a black gap
         this.bbPreviewing = true;
-      }, kind === 'live' ? 450 : 600);
+      }, 450);
     };
-    if (auto && (kind === 'movie' || kind === 'cont' || kind === 'series') && it && !needsPin(kind === 'cont' ? 'movie' : kind, it.cat)) {
-      playIn(async (r) => {
-        if (kind === 'cont') { previewVod(it.key, it.key.startsWith('movie:') ? movieUrl({ id: it.key.slice(6), ext: it.ext, url: it.url }) : episodeUrl({ id: it.key.slice(3), ext: it.ext, url: it.url }), r, it.pos); return true; }
-        // from the beginning: no seeking inside the file, so the picture comes up fastest
-        if (kind === 'movie') { previewVod('m:' + it.id, movieUrl(it), r, 0); return true; }
-        const ep = await epP;
-        if (this.bbKey !== key || !ep) return false;
-        previewVod('s:' + it.id, episodeUrl(ep), r, 0);
-        return true;
-      });
+    // films and series: the trailer from YouTube (nothing plays if there isn't one)
+    if (auto && (kind === 'movie' || kind === 'series' || kind === 'cont' || kind === 'rv') && it) {
+      const k = kind === 'cont' || kind === 'rv' ? (String(it.key || '').startsWith('movie:') || it.kind === 'movie' ? 'movie' : 'series') : kind;
+      const id = kind === 'cont' || kind === 'rv' ? (k === 'movie' ? String(it.key || '').replace(/^movie:/, '') || it.id : it.seriesId) : it.id;
+      if (id && !needsPin(k, it.cat)) {
+        trailerOf(k, id, it.yt).then((yt) => {
+          if (!yt || this.bbKey !== key) return;
+          // a short wait so passing over tiles doesn't start trailers; the player itself is already warm
+          this.bbPrevTimer = setTimeout(() => { if (this.bbKey === key) this.ytPlay(yt, key); }, 250);
+        });
+        // look up the next tiles' trailers too, so they're ready when you get there
+        if (tile && rowEl && (kind === 'movie' || kind === 'series')) {
+          let n = tile.nextElementSibling;
+          for (let j = 0; j < 2 && n; j++, n = n.nextElementSibling) if (n.dataset.id && n.dataset.k === kind) trailerOf(kind, n.dataset.id, (C.byId[kind].get(n.dataset.id) || {}).yt);
+        }
+      }
     }
     // channels: after a moment, the live picture plays up there
     if (auto && kind === 'live' && it && !needsPin('live', it.cat)) playIn(async (r) => { preview(it, r); return true; });
+  }
+
+  // ---------- trailer frame (YouTube's own player, kept loaded) ----------
+  ytFrame() {
+    let f = this.view.querySelector('#bb-yt');
+    if (f || !this.view.querySelector('#bb')) return f;
+    f = document.createElement('iframe');
+    f.id = 'bb-yt'; f.className = 'bb-yt';
+    f.setAttribute('allow', 'autoplay; encrypted-media');
+    f.setAttribute('referrerpolicy', 'strict-origin-when-cross-origin');
+    f.tabIndex = -1;
+    // Android loads the app from a file, which YouTube won't play under; give it a web address
+    f.src = location.protocol === 'file:' ? 'https://thumb.lumen/yt.html' : 'yt.html';
+    this.view.querySelector('#bb').insertBefore(f, this.view.querySelector('#bb .topbar'));
+    return f;
+  }
+  ytPlay(id, key) {
+    const f = this.ytFrame();
+    if (!f || !f.contentWindow) return;
+    this.ytWant = { id, key };
+    f.contentWindow.postMessage({ cmd: 'play', id, start: 0 }, '*');
+  }
+  ytStop() {
+    if (!this.ytWant) return;
+    this.ytWant = null;
+    this.view.classList.remove('bb-trailer');
+    const f = this.view.querySelector('#bb-yt');
+    if (f && f.contentWindow) f.contentWindow.postMessage({ cmd: 'stop' }, '*');
   }
 
   // Add the next tiles to an endless row.
@@ -532,7 +577,7 @@ export class HomeScreen {
   }
 
   destroy() {
-    clearTimeout(this.bbTimer); clearTimeout(this.bbPrevTimer); clearTimeout(this.bbInfoTimer); document.removeEventListener('preview-failed', this.onPvFail); document.removeEventListener('preview-ready', this.onPvReady);
+    clearTimeout(this.bbTimer); clearTimeout(this.bbPrevTimer); clearTimeout(this.bbInfoTimer); document.removeEventListener('preview-failed', this.onPvFail); document.removeEventListener('preview-ready', this.onPvReady); window.removeEventListener('message', this.onYt); this.ytStop();
     document.removeEventListener('progress-changed', this.onProg); clearTimeout(this.previewTimer); stopPreview(); document.removeEventListener('update-available', this.onUpd); }
 }
 
