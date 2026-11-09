@@ -26,7 +26,7 @@ import java.util.concurrent.Executors
  */
 class NativeBridge(private val act: MainActivity) {
 
-    private val io = Executors.newFixedThreadPool(4)
+    private val io = Executors.newFixedThreadPool(6)   // channels, films and series download side by side
     private val bodies = ConcurrentHashMap<Int, String>()
     private val dir: File = File(act.filesDir, "cache").apply { mkdirs() }
     private var recognizer: SpeechRecognizer? = null

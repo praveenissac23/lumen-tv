@@ -15,6 +15,7 @@ export const C = {
   byEpg: new Map(),   // epg channel id -> first live channel using it
   info: {},           // account info for settings screen
   updatedAt: 0,
+  stamps: {},   // when channels / films / series were last fetched
 };
 
 const ADULT = /\bxxx\b|\badult|18\s*\+|\bporn/i;
@@ -45,7 +46,7 @@ function hydrate(raw) {
 // channels before films and series are parsed.
 const strip = (arr) => arr.map(({ n, ...rest }) => rest);
 function writeSection(pl, k) { cacheWrite(`cat-${k}:${pl.id}`, JSON.stringify(strip(C[k]))); }
-function writeMeta(pl) { cacheWrite('cat-meta:' + pl.id, JSON.stringify({ cats: C.cats, info: C.info, updatedAt: C.updatedAt, finished: pl.type !== 'xtream', counts: { live: C.live.length, movie: C.movie.length, series: C.series.length } })); }
+function writeMeta(pl) { cacheWrite('cat-meta:' + pl.id, JSON.stringify({ cats: C.cats, info: C.info, updatedAt: C.updatedAt, stamps: C.stamps, finished: pl.type !== 'xtream', counts: { live: C.live.length, movie: C.movie.length, series: C.series.length } })); }
 // Section files hold compact provider records (Xtream) or finished items (M3U).
 function readSection(pl, kind, finished) {
   const raw = readJson(`cat-${kind}:${pl.id}`, []);
@@ -74,6 +75,7 @@ export function loadFromCache(onMore) {
   hydrateCats(meta.cats);
   C.info = meta.info || {};
   C.updatedAt = meta.updatedAt || 0;
+  C.stamps = meta.stamps || { live: C.updatedAt, movie: C.updatedAt, series: C.updatedAt };
   const live = readSection(pl, 'live', meta.finished);
   live.forEach((ch, i) => { if (!ch.num) ch.num = i + 1; });
   hydrateSection('live', live);
@@ -86,24 +88,44 @@ export function loadFromCache(onMore) {
       hydrateSection('series', readSection(pl, 'series', meta.finished));
       const want = meta.counts || {};
       const missing = (want.movie && !C.movie.length) || (want.series && !C.series.length);
-      if (missing) C.updatedAt = 0;   // a section file is gone: fetch again
+      if (missing) { C.updatedAt = 0; C.stamps = {}; }   // a section file is gone: fetch again
       onMore && onMore(missing ? 'missing' : 'vod');
     }, 0);
   }, 50);
   return true;
 }
 
-// Fetch the whole catalogue. Resolves when live channels are usable;
-// films and series continue in the background (onPartial is called per section).
-export async function refresh(onPartial) {
+// Fetch the catalogue: channels, films and series all at once (in parallel), each shown as soon
+// as it arrives (onPartial('live') / onPartial('vod')). `parts` limits it to the sections that are due.
+export const PARTS = ['live', 'movie', 'series'];
+export async function refresh(onPartial, parts = PARTS, { guide = true } = {}) {
   const pl = activePlaylist();
   if (!pl) return;
   C.source = pl;
-  if (pl.type === 'xtream') await refreshXtream(pl, onPartial);
-  else await refreshM3u(pl, onPartial);
-  C.updatedAt = Date.now();
+  if (pl.type === 'xtream') await refreshXtream(pl, onPartial, parts);
+  else { await refreshM3u(pl, onPartial); parts = PARTS; }
+  const t = Date.now();
+  for (const p of parts) C.stamps[p] = t;
+  C.updatedAt = Math.min(...PARTS.map((p) => C.stamps[p] || 0)) || t;
   writeMeta(pl);
-  refreshEpg(pl).then(() => onPartial && onPartial('epg')).catch(() => {});
+  if (guide) refreshEpg(pl).then(() => onPartial && onPartial('epg')).catch(() => {});
+}
+// Same, but resolves as soon as the channels are in; films and series carry on in the background.
+export function refreshQuick(onPartial, parts = PARTS) {
+  return new Promise((resolve, reject) => {
+    let done = false;
+    const finish = (fn) => { if (!done) { done = true; fn(); } };
+    refresh((p) => { onPartial && onPartial(p); if (p === 'live') finish(resolve); }, parts)
+      .then(() => finish(resolve), (e) => finish(() => reject(e)));
+  });
+}
+// Sections whose automatic update is due (Settings > Playlists).
+const EVERY = { live: 'refreshLive', movie: 'refreshMovie', series: 'refreshSeries' };
+export function dueParts() {
+  return PARTS.filter((p) => {
+    const days = +setting(EVERY[p]);
+    return days > 0 && Date.now() - (C.stamps[p] || 0) > days * 86400000 - 10 * 60000;
+  });
 }
 
 export function catalogueAge() { return C.updatedAt ? Date.now() - C.updatedAt : Infinity; }
@@ -166,25 +188,32 @@ function finishItem(o, kind) {
     year: yearOf(rawName, o.date), added: +o.added || 0, plot: String(o.plot || '').slice(0, 300), genre: o.genre || '' };
 }
 
-async function refreshXtream(pl, onPartial) {
-  const acc = await testXtream(pl);
-  const ui = acc.user_info || {};
-  C.info = {
-    status: ui.status, expires: ui.exp_date ? +ui.exp_date : null, maxConn: ui.max_connections,
-    active: ui.active_cons, tz: acc.server_info?.timezone || null,
-  };
-  const [lc, live] = await Promise.all([xJson(pl, '&action=get_live_categories'), fetchList(pl, 'get_live_streams', 'live')]);
-  live.forEach((ch, i) => { if (!ch.num) ch.num = i + 1; });
-  hydrateCats({ live: mapCats(lc), movie: C.cats.movie, series: C.cats.series });
-  hydrateSection('live', live);
-  C.ready = true;
-  onPartial && onPartial('live');
-
-  const [vc, sc] = await Promise.all([xJson(pl, '&action=get_vod_categories'), xJson(pl, '&action=get_series_categories')]);
-  hydrateCats({ live: C.cats.live, movie: mapCats(vc), series: mapCats(sc) });
-  hydrateSection('movie', await fetchList(pl, 'get_vod_streams', 'movie'));
-  hydrateSection('series', await fetchList(pl, 'get_series', 'series'));
-  onPartial && onPartial('vod');
+async function refreshXtream(pl, onPartial, parts = PARTS) {
+  const account = testXtream(pl).then((acc) => {
+    const ui = acc.user_info || {};
+    C.info = {
+      status: ui.status, expires: ui.exp_date ? +ui.exp_date : null, maxConn: ui.max_connections,
+      active: ui.active_cons, tz: acc.server_info?.timezone || null,
+    };
+  });
+  const jobs = [account];
+  if (parts.includes('live')) {
+    jobs.push(Promise.all([xJson(pl, '&action=get_live_categories'), fetchList(pl, 'get_live_streams', 'live')]).then(([lc, live]) => {
+      live.forEach((ch, i) => { if (!ch.num) ch.num = i + 1; });
+      hydrateCats({ ...C.cats, live: mapCats(lc) });
+      hydrateSection('live', live);
+      C.ready = true;
+      onPartial && onPartial('live');
+    }));
+  }
+  const vodPart = (kind, catAction, listAction) => Promise.all([xJson(pl, '&action=' + catAction), fetchList(pl, listAction, kind)]).then(([cats, items]) => {
+    hydrateCats({ ...C.cats, [kind]: mapCats(cats) });
+    hydrateSection(kind, items);
+    onPartial && onPartial('vod');
+  });
+  if (parts.includes('movie')) jobs.push(vodPart('movie', 'get_vod_categories', 'get_vod_streams'));
+  if (parts.includes('series')) jobs.push(vodPart('series', 'get_series_categories', 'get_series'));
+  await Promise.all(jobs);
 }
 
 const noYear = (n) => n.replace(/\s*[([]?(19|20)\d{2}[)\]]?\s*$/, '').trim() || n;
@@ -304,7 +333,9 @@ export function epgUrlFor(pl) {
 export async function refreshEpg(pl, force = false) {
   const url = epgUrlFor(pl);
   if (!url) return 0;
-  return importEpg(url, C.live, { force });
+  // how old the guide may get before it is fetched again (Settings > Playlists; 0 = only on Refresh)
+  const h = +setting('refreshGuideH');
+  return importEpg(url, C.live, { force, maxAgeMs: (h > 0 ? h : 24 * 365) * 3600 * 1000 });
 }
 export const nowNext = epgNowNext;
 export const progs = epgProgs;

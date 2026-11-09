@@ -1,11 +1,17 @@
 // Settings: playlists, parental control, categories, playback, voice and remote, guide.
-import { C, testXtream, refresh, refreshEpg, loadFromCache, clearEpgCache } from '../data.js';
+import { C, testXtream, refresh, refreshQuick, refreshEpg, loadFromCache, clearEpgCache } from '../data.js';
 import { epgInfo } from '../epg.js';
 import { S, set, setting, upsertPlaylist, removePlaylist, setLocked, isLocked, setHidden, isHidden, activePlaylist, flush, toggleLang, moveLang, togglePin, langRowsFor, setLangRows, homeSections, setHomeSections, langPrefs, setLangPrefs } from '../store.js';
 import { LANGS, langById, langItems } from '../languages.js';
 import { langCatList, catYear } from '../languages.js';
 import { SUB_LANGS, langName } from '../subs.js';
 import { WALLPAPERS, ACCENTS, THEMES, applyLook } from '../look.js';
+
+// automatic update choices (keys are days / hours; 0 = only when you press Refresh)
+const DAY_OPTS = [[1, 'Every day'], [2, 'Every 2 days'], [3, 'Every 3 days'], [7, 'Every week'], [14, 'Every 2 weeks'], [0, 'Only when I press Refresh']];
+const HOUR_OPTS = [[3, 'Every 3 hours'], [6, 'Every 6 hours'], [12, 'Every 12 hours'], [24, 'Every day'], [48, 'Every 2 days'], [0, 'Only when I press Refresh']];
+const toMap = (opts) => opts.reduce((m, [k, v]) => { m[k] = v; return m; }, {});
+const DAYS = toMap(DAY_OPTS), HOURS = toMap(HOUR_OPTS);
 import qrcode from 'qrcode-generator';
 import { update, checkForUpdate, installUpdate, currentBuild } from '../updates.js';
 import { esc } from '../util.js';
@@ -60,8 +66,11 @@ export class SettingsScreen {
       ${this.row('Add Xtream Codes login', icon('plus'), 'addx', '', 'Server address, username and password')}
       ${this.row('Add M3U playlist link', icon('plus'), 'addm', '', 'Optional XMLTV guide link')}
       ${activePlaylist() ? `<h2>Current subscription</h2>
-        ${this.row('Refresh channels and guide', icon('refresh'), 'refresh', '', C.updatedAt ? `Last updated ${new Date(C.updatedAt).toLocaleString()}` : '')}
-        ${this.row('Update channels and films automatically', { 0: 'Only when I press Refresh', 1: 'Every day', 2: 'Every 2 days', 3: 'Every 3 days', 7: 'Every 7 days' }[+setting('catalogueRefresh')] || 'Every day', 'pick', 'catalogueRefresh', 'New films and channels from your provider appear after an update')}
+        ${this.row('Refresh everything now', icon('refresh'), 'refresh', '', C.updatedAt ? `Last updated ${new Date(C.updatedAt).toLocaleString()}` : '')}
+        <h2>Update automatically</h2>
+        ${[['refreshLive', 'Channels', 'live'], ['refreshMovie', 'Films', 'movie'], ['refreshSeries', 'Series', 'series']].map(([k, label, part]) =>
+          this.row(label, DAYS[+setting(k)] || 'Every day', 'pick', k, C.stamps && C.stamps[part] ? `Last updated ${new Date(C.stamps[part]).toLocaleString()}` : 'In the background; the app stays usable')).join('')}
+        ${this.row('TV guide', HOURS[+setting('refreshGuideH')] || 'Every 6 hours', 'pick', 'refreshGuideH', 'The guide covers the next 2 days')}
         ${info.status ? this.row('Account status', esc(info.status), 'noop') : ''}
         ${exp ? this.row('Expires', esc(exp), 'noop') : ''}
         ${info.maxConn ? this.row('Connections', `${esc(info.active ?? 0)} of ${esc(info.maxConn)} in use`, 'noop') : ''}` : ''}`;
@@ -330,7 +339,11 @@ export class SettingsScreen {
         menuKey: [['voice', 'Starts voice search'], ['options', 'Opens options']],
         epgOffsetHours: [-3, -2, -1, 0, 1, 2, 3].map((h) => [h, h === 0 ? 'No shift' : `${h > 0 ? '+' : ''}${h} h`]),
         startScreen: [['home', 'Home'], ['live', 'Live TV'], ['guide', 'TV guide']],
-        catalogueRefresh: [[1, 'Every day'], [2, 'Every 2 days'], [3, 'Every 3 days'], [7, 'Every 7 days'], [0, 'Only when I press Refresh']],
+        catalogueRefresh: DAY_OPTS,
+        refreshLive: DAY_OPTS,
+        refreshMovie: DAY_OPTS,
+        refreshSeries: DAY_OPTS,
+        refreshGuideH: HOUR_OPTS,
         homeLayout: [['billboard', 'Preview banner (focused title on top)'], ['rows', 'Just rows'], ['hero', 'Live preview on top'], ['shortcuts', 'Shortcut buttons'], ['spotlight', 'Big Continue card'], ['compact', 'Compact rows']],
         subSize: [['s', 'Small'], ['m', 'Medium'], ['l', 'Large']],
         uiSize: [['s', 'Smaller (if edges are cut off)'], ['m', 'Fit the TV'], ['l', 'Larger']],
@@ -406,7 +419,7 @@ export class SettingsScreen {
     set('active', id); flush();
     toast('Loading channels');
     try {
-      if (!loadFromCache()) await refresh(() => {});
+      if (!loadFromCache()) await refreshQuick(() => {});   // usable as soon as channels are in
       else refresh(() => {}).catch(() => {});
       toast(`${C.live.length} channels ready`);
     } catch (e) {
@@ -437,7 +450,7 @@ export class SettingsScreen {
 
   async doRefresh(btn) {
     toast('Refreshing channels');
-    try { await refresh(() => {}); toast(`Updated: ${C.live.length} channels, ${C.movie.length} films, ${C.series.length} series`); }
+    try { await refresh(() => {}); const pl = activePlaylist(); if (pl) refreshEpg(pl, true).catch(() => {}); toast(`Updated: ${C.live.length} channels, ${C.movie.length} films, ${C.series.length} series`); }
     catch (e) { toast(`Refresh failed: ${e.message}`, 'err'); }
     this.show('playlists'); focus(this.view.querySelector('[data-act="refresh"]'));
   }

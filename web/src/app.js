@@ -2,7 +2,7 @@
 import { $, esc, el, hhmm, now } from './util.js';
 import * as N from './native.js';
 import { initInput, pushLayer, popLayer, focus, focusFirst, clearLayers, topLayer } from './nav.js';
-import { C, loadFromCache, refresh, catalogueAge, needsPin, testXtream } from './data.js';
+import { C, loadFromCache, refresh, refreshQuick, refreshEpg, dueParts, needsPin, testXtream } from './data.js';
 import { S, set, setting, sessionUnlocked, unlockSession, flush, upsertPlaylist } from './store.js';
 import { icon, toast, pinPad, patchNowSlots } from './ui.js';
 import { mountBackground, applyLook } from './look.js';
@@ -248,7 +248,8 @@ N.on('remote', async (d) => {
     if (pl.type === 'xtream') { try { await testXtream(pl); } catch (e) { toast(`Couldn\u2019t connect: ${e.message}`, 'err'); return; } }
     upsertPlaylist(pl); set('active', pl.id); flush();
     toast('Loading channels from your new playlist');
-    try { await refresh(() => {}); toast(`${C.live.length} channels ready`); go('home', {}, { root: true }); }
+    // home opens as soon as the channels are in; films, series and the guide keep loading behind it
+    try { await refreshQuick((p) => { if (p === 'vod' && current && current.name === 'home' && !player.mode) reload(); }); toast(`${C.live.length} channels ready · films and series loading`); go('home', {}, { root: true }); }
     catch (e) { toast(`Couldn\u2019t load the playlist: ${e.message}`, 'err'); }
   }
 });
@@ -295,20 +296,20 @@ N.on('epg', (d) => {
   else if (d.state === 'error') toast('Couldn’t download the TV guide', 'err');
 });
 
-// Channels and films update automatically every N days (Settings > Playlists), on start and while the app is open.
-function catalogueDue() {
-  const days = +setting('catalogueRefresh');
-  return days > 0 && catalogueAge() > days * 86400000;
-}
+// Channels, films, series and the guide update automatically on their own schedules
+// (Settings > Playlists), at start and while the app is open, in the background.
 let refreshing = false;
-setInterval(() => {
+function autoRefresh() {
   const pl = S.playlists.find((p) => p.id === S.active);
-  if (!pl || refreshing || player.mode || !catalogueDue()) return;
+  if (!pl || refreshing || player.mode) return;
+  const parts = dueParts();
+  if (!parts.length) { refreshEpg(pl).then((n) => { if (n && current && ['live', 'guide'].includes(current.name) && !player.mode) reload(); }).catch(() => {}); return; }
   refreshing = true;
-  refresh((part) => { if (part !== 'epg' && current && current.name === 'home' && !player.mode) reload(); })
-    .then(() => toast(`${pl.name} updated: ${C.live.length.toLocaleString()} channels, ${C.movie.length.toLocaleString()} films`))
+  refresh((part) => { if (part !== 'epg' && current && current.name === 'home' && !player.mode) reload(); }, parts)
+    .then(() => toast(`${pl.name} updated: ${parts.map((p) => ({ live: `${C.live.length.toLocaleString()} channels`, movie: `${C.movie.length.toLocaleString()} films`, series: `${C.series.length.toLocaleString()} series` })[p]).join(', ')}`))
     .catch(() => {}).finally(() => { refreshing = false; });
-}, 30 * 60 * 1000);
+}
+setInterval(autoRefresh, 30 * 60 * 1000);
 
 function boot() {
   const t0 = performance.now();
@@ -322,8 +323,12 @@ function boot() {
   });
   if (hasCache) start();
   else showLoading();
+  // one-time: carry the old single "update every N days" choice over to channels, films and series
+  if (!setting('refresh2')) { const d = setting('catalogueRefresh'); if (d != null) for (const k of ['refreshLive', 'refreshMovie', 'refreshSeries']) setting(k, d); setting('refresh2', true); }
   const pl = S.playlists.find((p) => p.id === S.active);
-  if (pl && (!hasCache || catalogueDue())) {
+  if (pl && hasCache && dueParts().length) setTimeout(autoRefresh, 4000);   // after the screen is up
+  else if (pl && hasCache) setTimeout(autoRefresh, 8000);                   // guide only, if due
+  if (pl && !hasCache) {
     refresh((part) => {
       if (!current) { start(); return; }
       if (player.mode) return;

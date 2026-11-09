@@ -45,7 +45,11 @@ const DEFAULTS = {
     uiSize: 'm',           // s | m | l  screen size adjustment
     lite: true,            // lighter animations for TV sticks
     autoAppUpdate: true,   // download new app builds by themselves and show the Install screen
-    catalogueRefresh: 1,   // days between automatic channel/film updates (0 = only when you press Refresh)
+    catalogueRefresh: 1,   // (old single setting; the four below replace it)
+    refreshLive: 1,        // days between automatic updates of channels (0 = only when you press Refresh)
+    refreshMovie: 1,       // ...films
+    refreshSeries: 1,      // ...series
+    refreshGuideH: 6,      // hours between TV guide downloads (0 = only when you press Refresh)
     homeLayout: 'billboard', // billboard | rows | hero | shortcuts | spotlight | compact
   },
 };

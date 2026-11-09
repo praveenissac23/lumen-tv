@@ -137,7 +137,7 @@ export function epgInfo() {
 }
 
 // Download the guide for this playlist's channels into the native database.
-export async function importEpg(url, channels, { force = false } = {}) {
+export async function importEpg(url, channels, { force = false, maxAgeMs = 6 * 3600 * 1000 } = {}) {
   if (!N.isNative) {
     // browser: parse in memory (test/demo only)
     const xml = await N.http(url, { timeout: 120000 });
@@ -147,7 +147,7 @@ export async function importEpg(url, channels, { force = false } = {}) {
   if (local) { local = null; clearEpgCache(); }   // leave the demo guide behind
   const info = epgInfo();
   if (!force && info.importing) return 0;
-  if (!force && info.count > 0 && Date.now() - info.importedAt < 6 * 3600 * 1000) return info.count;
+  if (!force && info.count > 0 && Date.now() - info.importedAt < maxAgeMs) return info.count;
   const ids = [...new Set(channels.map((c) => c.epg).filter(Boolean))].join(',');
   const t = now();
   const n = await N.epgImport(url, t - 36 * 3600, t + 48 * 3600, ids);
