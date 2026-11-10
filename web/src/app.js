@@ -2,7 +2,7 @@
 import { $, esc, el, hhmm, now } from './util.js';
 import * as N from './native.js';
 import { initInput, pushLayer, popLayer, focus, focusFirst, clearLayers, topLayer } from './nav.js';
-import { C, loadFromCache, refresh, refreshQuick, refreshEpg, dueParts, needsPin, testXtream } from './data.js';
+import { C, loadFromCache, refresh, refreshQuick, refreshEpg, dueParts, autoParts, needsPin, testXtream } from './data.js';
 import { S, set, setting, sessionUnlocked, unlockSession, flush, upsertPlaylist } from './store.js';
 import { icon, toast, pinPad, patchNowSlots } from './ui.js';
 import { mountBackground, applyLook } from './look.js';
@@ -296,20 +296,77 @@ N.on('epg', (d) => {
   else if (d.state === 'error') toast('Couldn’t download the TV guide', 'err');
 });
 
-// Channels, films, series and the guide update automatically on their own schedules
-// (Settings > Playlists), at start and while the app is open, in the background.
+// Channels, films, series and the guide update automatically: everything the first time the app
+// is opened each day, and each section on its own schedule (Settings > Playlists) in between.
+// A bar at the bottom of Home shows what is being updated.
 let refreshing = false;
+const today = () => new Date().toDateString();
+const LABEL = { live: 'Channels', movie: 'Films', series: 'Series', epg: 'TV guide' };
+
+const bar = {
+  el: null,
+  state: {},
+  mount() {
+    if (this.el) return this.el;
+    this.el = document.createElement('div');
+    this.el.id = 'upd-bar'; this.el.className = 'upd-bar'; this.el.hidden = true;
+    (document.getElementById('stage') || document.body).appendChild(this.el);
+    return this.el;
+  },
+  start(parts) {
+    clearTimeout(this.hideT);
+    this.state = {}; for (const p of parts) this.state[p] = 'busy';
+    this.paint('Updating your lists');
+  },
+  set(p, st) { if (this.state[p] && this.state[p] !== st) { this.state[p] = st; this.paint(this.title); } },
+  paint(title) {
+    const el = this.mount();
+    this.title = title;
+    const done = Object.values(this.state).every((v) => v !== 'busy');
+    el.classList.toggle('done', done);
+    el.innerHTML = `${done ? icon('check') : '<span class="spinner sm"></span>'}<b>${title}</b>${Object.entries(this.state).map(([p, v]) =>
+      `<span class="upd-chip ${v}">${v === 'ok' ? icon('check') : v === 'err' ? '!' : '<i></i>'}${LABEL[p]}</span>`).join('')}`;
+    el.hidden = false;
+  },
+  finish(title) { this.paint(title); clearTimeout(this.hideT); this.hideT = setTimeout(() => { if (this.el) this.el.hidden = true; }, 7000); },
+};
+
+// Refill Home with the new lists, but never under the remote: wait until it has been still a few seconds.
+function reloadHomeWhenIdle() {
+  clearTimeout(reloadHomeWhenIdle.t);
+  if (!current || current.name !== 'home' || player.mode) return;
+  const idle = performance.now() - (window.__lastNav || 0);
+  if (idle < 4000) { reloadHomeWhenIdle.t = setTimeout(reloadHomeWhenIdle, 4100 - idle); return; }
+  reload();
+}
+
 function autoRefresh() {
   const pl = S.playlists.find((p) => p.id === S.active);
   if (!pl || refreshing || player.mode) return;
-  const parts = dueParts();
+  const daily = setting('lastDailyRefresh') !== today();
+  const parts = [...new Set([...(daily ? autoParts() : []), ...dueParts()])];
   if (!parts.length) { refreshEpg(pl).then((n) => { if (n && current && ['live', 'guide'].includes(current.name) && !player.mode) reload(); }).catch(() => {}); return; }
   refreshing = true;
-  refresh((part) => { if (part !== 'epg' && current && current.name === 'home' && !player.mode) reload(); }, parts)
-    .then(() => toast(`${pl.name} updated: ${parts.map((p) => ({ live: `${C.live.length.toLocaleString()} channels`, movie: `${C.movie.length.toLocaleString()} films`, series: `${C.series.length.toLocaleString()} series` })[p]).join(', ')}`))
-    .catch(() => {}).finally(() => { refreshing = false; });
+  bar.start(daily ? [...parts, 'epg'] : parts);
+  refresh((part, kind) => {
+    if (part === 'live') bar.set('live', 'ok');
+    if (part === 'vod' && kind) bar.set(kind, 'ok');
+    if (part !== 'epg') reloadHomeWhenIdle();
+  }, parts, { guide: !daily })
+    .then(() => {
+      if (daily) setting('lastDailyRefresh', today());
+      const counts = parts.map((p) => ({ live: `${C.live.length.toLocaleString()} channels`, movie: `${C.movie.length.toLocaleString()} films`, series: `${C.series.length.toLocaleString()} series` })[p]).join(' · ');
+      if (!daily) { bar.finish(`Lists updated · ${counts}`); return; }
+      // first open of the day: the guide too, fresh
+      return refreshEpg(pl, true).then(() => bar.set('epg', 'ok'), () => bar.set('epg', 'err'))
+        .then(() => bar.finish(`Lists updated · ${counts}`));
+    })
+    .catch(() => { for (const p of Object.keys(bar.state)) if (bar.state[p] === 'busy') bar.state[p] = 'err'; bar.finish('Couldn\u2019t update right now \u2014 showing your saved lists'); })
+    .finally(() => { refreshing = false; });
 }
 setInterval(autoRefresh, 30 * 60 * 1000);
+// coming back to the app (it may have stayed open overnight)
+document.addEventListener('visibilitychange', () => { if (document.visibilityState === 'visible') setTimeout(autoRefresh, 1500); });
 
 function boot() {
   const t0 = performance.now();
@@ -326,8 +383,7 @@ function boot() {
   // one-time: carry the old single "update every N days" choice over to channels, films and series
   if (!setting('refresh2')) { const d = setting('catalogueRefresh'); if (d != null) for (const k of ['refreshLive', 'refreshMovie', 'refreshSeries']) setting(k, d); setting('refresh2', true); }
   const pl = S.playlists.find((p) => p.id === S.active);
-  if (pl && hasCache && dueParts().length) setTimeout(autoRefresh, 4000);   // after the screen is up
-  else if (pl && hasCache) setTimeout(autoRefresh, 8000);                   // guide only, if due
+  if (pl && hasCache) setTimeout(autoRefresh, 2500);   // after the screen is up: first open of the day refreshes everything
   if (pl && !hasCache) {
     refresh((part) => {
       if (!current) { start(); return; }

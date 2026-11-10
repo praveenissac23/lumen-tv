@@ -121,6 +121,8 @@ export function refreshQuick(onPartial, parts = PARTS) {
 }
 // Sections whose automatic update is due (Settings > Playlists).
 const EVERY = { live: 'refreshLive', movie: 'refreshMovie', series: 'refreshSeries' };
+// Sections that update automatically at all (not set to 'only when I press Refresh').
+export function autoParts() { return PARTS.filter((p) => +setting(EVERY[p]) !== 0); }
 export function dueParts() {
   return PARTS.filter((p) => {
     const days = +setting(EVERY[p]);
@@ -209,7 +211,7 @@ async function refreshXtream(pl, onPartial, parts = PARTS) {
   const vodPart = (kind, catAction, listAction) => Promise.all([xJson(pl, '&action=' + catAction), fetchList(pl, listAction, kind)]).then(([cats, items]) => {
     hydrateCats({ ...C.cats, [kind]: mapCats(cats) });
     hydrateSection(kind, items);
-    onPartial && onPartial('vod');
+    onPartial && onPartial('vod', kind);
   });
   if (parts.includes('movie')) jobs.push(vodPart('movie', 'get_vod_categories', 'get_vod_streams'));
   if (parts.includes('series')) jobs.push(vodPart('series', 'get_series_categories', 'get_series'));

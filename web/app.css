@@ -754,3 +754,20 @@ body.lite .vtrack, body.lite .sr-track, body.lite .st-track { transition-duratio
 .trailer-ov.hint .trailer-hint { opacity: 1; }
 
 .btn.busy { opacity: .6; }
+
+/* bottom bar on Home while the lists update */
+.upd-bar { position: absolute; left: 50%; bottom: 28px; transform: translateX(-50%); z-index: 40; display: flex; align-items: center; gap: 16px;
+  padding: 14px 26px; border-radius: 40px; background: rgba(12, 10, 20, .92); box-shadow: 0 10px 30px rgba(0, 0, 0, .5), inset 0 0 0 1px rgba(255, 255, 255, .08);
+  font-size: 22px; color: var(--text-2); white-space: nowrap; pointer-events: none; }
+.upd-bar[hidden] { display: none; }
+body:not([data-screen="home"]) .upd-bar { display: none; }
+.upd-bar b { color: var(--text); font-weight: 600; margin-right: 6px; }
+.upd-bar > .ic { color: var(--brass); font-size: 26px; }
+.upd-chip { display: inline-flex; align-items: center; gap: 8px; padding: 6px 14px; border-radius: 20px; background: rgba(255, 255, 255, .06); }
+.upd-chip i { width: 10px; height: 10px; border-radius: 50%; background: var(--brass); animation: updPulse 1s infinite alternate; }
+.upd-chip.ok { color: var(--text); }
+.upd-chip.ok .ic { color: var(--brass); font-size: 20px; }
+.upd-chip.err { color: #ff8a80; }
+.upd-bar.done .upd-chip:not(.err) { display: none; }
+.spinner.sm { width: 24px; height: 24px; border-width: 3px; }
+@keyframes updPulse { from { opacity: .3; } to { opacity: 1; } }
