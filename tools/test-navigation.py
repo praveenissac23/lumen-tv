@@ -18,7 +18,7 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Quiet, directory=str(ROOT / 'build/web')))
 threading.Thread(target=server.serve_forever, daemon=True).start()
-seed = {'active':'demo','favs':{'live':['d1'],'movie':['f3'],'series':[]},'settings':{'autoplayLast':False,'autoPreview':False,'preview':False,'lockAdult':True,'lite':True,'motion':False,'torrentSource':'https://source.test','torrentSourceName':'Test provider'}}
+seed = {'active':'demo','favs':{'live':['d1'],'movie':['f3'],'series':[]},'settings':{'autoplayLast':False,'autoPreview':False,'preview':False,'lockAdult':True,'lite':True,'motion':False,'playerMovie':'org.videolan.vlc','torrentSource':'https://source.test','torrentSourceName':'Test provider'}}
 meta = {'id':'tt100','name':'Test Harbour','type':'movie','releaseInfo':'2025'}
 errors = []
 try:
@@ -27,6 +27,7 @@ try:
     page = browser.new_page(viewport={'width':1920,'height':1080})
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.add_init_script('localStorage.setItem("c:state",'+json.dumps(json.dumps(seed))+');')
+    page.add_init_script('localStorage.setItem("c:debrid-accounts",JSON.stringify({rd:{key:"TEST_FIXTURE_ONLY"}}));')
     page.route('https://v3-cinemeta.strem.io/**', lambda route: route.fulfill(json={'metas':[meta]} if '/catalog/movie/' in route.request.url else {'metas':[]}))
     page.route('https://source.test/**', lambda route: route.fulfill(json={'streams':[{'name':'1080p','title':'English · 2 GB','url':'https://cdn.test/video.mp4'},{'name':'720p','infoHash':'a'*40,'title':'seeders: 123'}]}))
     page.route('https://torrentio.strem.fun/**', lambda route: route.fulfill(json={'streams':[*({'name':'1080p','title':'Internet release · seeders: 999','infoHash':format(i+1,'040x'),'fileIdx':0} for i in range(40))]}))
@@ -53,11 +54,15 @@ try:
     assert page.locator('#td-play').is_enabled()
     assert 'Internet · Torrentio' in page.locator('[data-source="0"]').inner_text()
     assert 'internet torrents' in page.locator('#td-status').inner_text()
+    assert 'Real-Debrid' in page.locator('[data-source="0"] .td-route-debrid').inner_text()
+    assert 'Play in VLC' in page.locator('[data-source="0"] .td-row-play').inner_text()
+    (ROOT/'build/navigation-shots').mkdir(parents=True,exist_ok=True)
+    page.screenshot(path=str(ROOT/'build/navigation-shots/torrent-source-play.png'))
     # OK on the remote routes the focused row straight to playback, once.
-    page.evaluate("window.__plays=[];window.__keyTrace=[];for(const event of ['keydown','keyup','click'])document.addEventListener(event,e=>__keyTrace.push({event,key:e.key,target:e.target.outerHTML.slice(0,100)}),true);__app.current().ctl.launch=function(download){window.__plays.push({index:this.index,download})}")
+    page.evaluate("window.__plays=[];__app.current().ctl.launch=function(download){window.__plays.push({index:this.index,download})};true")
     page.locator('[data-source="0"]').focus()
     page.keyboard.press('Enter')
-    assert page.evaluate('JSON.stringify(__plays)') == '[{"index":0,"download":false}]', page.evaluate('JSON.stringify({plays:__plays,trace:__keyTrace,active:document.activeElement.outerHTML})')
+    assert page.evaluate('JSON.stringify(__plays)') == '[{"index":0,"download":false}]', page.evaluate('JSON.stringify({plays:__plays,active:document.activeElement.outerHTML})')
     assert 'OK · Play' in page.locator('[data-source="0"]').inner_text()
     for _ in range(12):
         page.keyboard.press('ArrowDown')
