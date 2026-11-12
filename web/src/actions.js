@@ -140,7 +140,7 @@ export async function download(kind, item) {
   await sendToDownloader(chosen.url, name, chosen.size);
 }
 
-async function sendToDownloader(url, file, size) {
+export async function sendToDownloader(url, file, size) {
   const dls = apps('download');
   let pkg = setting('downloader');
   if (pkg && !dls.some((a) => a.pkg === pkg)) pkg = '';

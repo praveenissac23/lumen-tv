@@ -771,3 +771,38 @@ body:not([data-screen="home"]) .upd-bar { display: none; }
 .upd-bar.done .upd-chip:not(.err) { display: none; }
 .spinner.sm { width: 24px; height: 24px; border-width: 3px; }
 @keyframes updPulse { from { opacity: .3; } to { opacity: 1; } }
+
+/* Optional torrent search: fixed tab bar, bounded rows, stable remote focus. */
+.sr-tabs { display:flex; gap:30px; height:76px; border-bottom:1px solid var(--line); }
+.sr-tab { padding:0 20px; font-size:26px; border-bottom:4px solid transparent; color:var(--text-2); border-radius:10px 10px 0 0; }
+.sr-tab.on { color:var(--text); border-bottom-color:var(--brass); }
+.sr-tab:focus { background:var(--raised); outline:2px solid var(--brass); outline-offset:-3px; }
+.sr-tab small { font-size:20px; color:var(--muted); }
+.sr-results > .sr-scroll { top:90px; }
+.sr-torrent-pane .sr-count { height:70px; font-size:22px; }
+.sr-torrent-pane .poster-tile { width:220px; }
+.td { position:absolute; inset:0; padding:48px 80px 42px 56px; display:grid; grid-template-columns:330px 1fr; gap:55px; }
+.td-info > .art { width:280px; margin-bottom:24px; }
+.td-info h1 { font-size:34px; line-height:1.15; margin-bottom:12px; }
+.td-info p { color:var(--text-2); font-size:22px; margin-bottom:20px; }
+.td-info .btn { font-size:21px; padding:0 20px; }
+.td-main { min-width:0; min-height:0; display:flex; flex-direction:column; }
+.td-heading { display:flex; gap:20px; align-items:center; justify-content:space-between; margin-bottom:24px; }
+.td-heading h1 { font-size:38px; line-height:1.15; }
+#td-seasons { margin-bottom:18px; }
+.td-scroll { overflow:hidden; flex:1; min-height:0; position:relative; padding:10px; margin:0 -10px; }
+.td-list { position:relative; display:flex; flex-direction:column; gap:14px; padding-bottom:20px; transition:transform .18s var(--ease); }
+.td-source { flex:none; width:100%; padding:20px 24px; border:2px solid var(--line); border-radius:14px; background:var(--surface); display:flex; flex-direction:column; gap:8px; }
+.td-source b { font-size:27px; }
+.td-source > span { font-size:22px; color:var(--text-2); overflow:hidden; text-overflow:ellipsis; white-space:nowrap; max-width:100%; }
+.td-source small { font-size:21px; color:var(--muted); }
+.td-source.selected { border-color:var(--brass); }
+.td-source:focus { background:var(--raised); outline:3px solid var(--brass); outline-offset:1px; }
+.td-status { min-height:70px; padding-top:18px; font-size:22px; color:var(--text-2); }
+.td-actions { display:flex; gap:20px; margin-top:16px; }
+.td-actions button:disabled { opacity:.4; cursor:default; }
+.td-foot { font-size:20px; color:var(--muted); margin-top:18px; }
+/* Respect the existing light-animation option; later theme rules must not override it. */
+body.lite .tile, body.lite .poster-tile { transition:transform .12s var(--ease),box-shadow .12s var(--ease); }
+body.lite .tile:focus, body.lite .poster-tile:focus { transform:scale(1.035); box-shadow:0 0 0 3px var(--brass); }
+body.lite .row-track, body.lite .home-track, body.lite .sr-track, body.lite .st-track, body.lite .td-list { transition:transform .16s var(--ease); }

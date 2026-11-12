@@ -219,7 +219,7 @@ def scenario_lang_films(page):
 SCEN = {k[9:]: v for k, v in globals().items() if k.startswith('scenario_')}
 
 with sync_playwright() as p:
-    b = p.chromium.launch(args=['--autoplay-policy=no-user-gesture-required'])
+    b = p.chromium.launch(executable_path=os.environ.get('CHROMIUM_PATH') or None, args=['--autoplay-policy=no-user-gesture-required'])
     names = sys.argv[2:] or list(SCEN)
     for name in names:
         ctx = b.new_context(viewport={'width': 1920, 'height': 1080}, device_scale_factor=1)

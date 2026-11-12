@@ -15,10 +15,11 @@ import { GuideScreen } from './screens/guide.js';
 import { VodScreen, DetailScreen } from './screens/vod.js';
 import { SearchScreen, tryLines } from './screens/searchview.js';
 import { SettingsScreen } from './screens/settings.js';
+import { TorrentDetailScreen } from './screens/torrentdetail.js';
 
 const SCREENS = {
   home: HomeScreen, live: LiveScreen, guide: GuideScreen, movies: VodScreen, series: VodScreen,
-  favourites: LiveScreen, detail: DetailScreen, search: SearchScreen, settings: SettingsScreen,
+  favourites: LiveScreen, detail: DetailScreen, search: SearchScreen, settings: SettingsScreen, torrent: TorrentDetailScreen,
 };
 const RAIL = [
   ['search', 'search', 'Search'], ['home', 'home', 'Home'], ['live', 'live', 'Live TV'], ['guide', 'guide', 'TV guide'],
@@ -89,7 +90,7 @@ function focusRail() {
   const active = $(`#rail [data-go="${railKeyFor(current && current.name)}"]`);
   focus(active || $('#rail .rail-item'));
 }
-const railKeyFor = (name) => (name === 'detail' ? (current.params.kind === 'series' ? 'series' : 'movies') : name);
+const railKeyFor = (name) => (name === 'torrent' ? 'search' : name === 'detail' ? (current.params.kind === 'series' ? 'series' : 'movies') : name);
 
 function markRail() {
   const k = current && railKeyFor(current.name);

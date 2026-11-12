@@ -211,7 +211,8 @@ export function playVod(item, resumeKey, onExit, queue) {
   const saved = resumeKey && progressOf(resumeKey);
   const title = item.sub && section === 'series' ? `${item.title} – ${item.sub}` : item.title;
   pushRecentVod({ key: resumeKey, kind: section === 'series' ? 'episode' : 'movie', id: item.id, seriesId: item.seriesId, title: item.seriesName || item.title,
-    sub: item.sub || '', poster: item.poster, url: item.url, ext: item.ext });
+    sub: item.sub || '', poster: item.poster, url: item.url, ext: item.ext,
+    ...(item.torrentItem ? { torrentItem: item.torrentItem, torrentEpisode: item.torrentEpisode } : {}) });
   if (!P.mode && viaDefaultPlayer(section, urlOr(item.url), title, saved ? saved.pos : 0)) {
     P.ext = { item, resumeKey, startedAt: Date.now() };   // VLC / MX report the position back when they close
     return;

@@ -1,0 +1,163 @@
+// Deterministic service / DOM tests. These do not replace Android TV hardware testing.
+const { test, after } = require('node:test');
+const assert = require('node:assert/strict');
+const { JSDOM } = require('jsdom');
+const esbuild = require('esbuild');
+const bundle = esbuild.buildSync({ stdin: { contents: `import * as torrents from './web/src/torrents.js'; import * as store from './web/src/store.js'; import {SearchScreen} from './web/src/screens/searchview.js'; import {TorrentDetailScreen} from './web/src/screens/torrentdetail.js'; import {SettingsScreen} from './web/src/screens/settings.js'; window.testAPI={torrents,store,SearchScreen,TorrentDetailScreen,SettingsScreen};`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
+const windows = [];
+const runtimeErrors = [];
+function setup(handler = async () => ({}), seed = {}) {
+  const dom = new JSDOM('<!doctype html><div id="stage"><div id="view"></div><div id="overlays"></div><div id="toast"></div></div>', { url: 'https://lumen.test/', runScripts: 'outside-only', pretendToBeVisual: true });
+  dom.window.addEventListener('error',e=>{runtimeErrors.push(String(e.error)); e.preventDefault();});
+  const w = dom.window, disk = new Map([['state', JSON.stringify(seed)]]), bodies = new Map(), calls = [];
+  w.Native = {
+    cacheRead: (k) => disk.get(k) || null, cacheWrite: (k,v) => disk.set(k,v), deviceInfo: () => '{}',
+    http: (id, url) => { calls.push({url,method:'GET'}); Promise.resolve().then(() => handler(url,'GET')).then(r => { bodies.set(id, JSON.stringify(r)); w.__nat('http',{id,ok:true}); }, () => w.__nat('http',{id,ok:false,error:'offline'})); },
+    call: (id, method, url, headers, body) => { calls.push({url,method,headers:JSON.parse(headers),body}); Promise.resolve().then(() => handler(url,method,body)).then(r => { bodies.set(id,typeof r === 'string' ? r : JSON.stringify(r)); w.__nat('call',{id,ok:true}); }, () => w.__nat('call',{id,ok:false,error:'offline'})); },
+    take: id => { const r=bodies.get(id); bodies.delete(id); return r; }, apps: () => JSON.stringify([{pkg:'org.videolan.vlc',name:'VLC',role:'player'},{pkg:'com.mxtech.videoplayer.ad',name:'MX Player',role:'player'},{pkg:'idm.internet.download.manager',name:'1DM',role:'download'},{pkg:'com.dv.adm',name:'ADM',role:'download'}]), openWith:(pkg,url,options)=>{calls.push({handoff:true,pkg,url,options:JSON.parse(options)});return true;},
+  };
+  w.eval(bundle); windows.push(w);
+  const api = w.testAPI;
+  return {...api, w, view:w.document.querySelector('#view'), disk, calls, app:{go(){}, back(){}, reload(){}, openVoice(){}}};
+}
+const delay = ms => new Promise(r=>setTimeout(r,ms));
+after(()=>{windows.forEach(w=>w.close()); assert.deepEqual(runtimeErrors,[], 'No uncaught DOM errors');});
+
+test('account keys are separate from existing IPTV state and invalid keys do not persist', async()=>{
+ const x=setup(async()=>({username:'test'}),{favs:{movie:['f3']},settings:{playerMovie:'org.videolan.vlc',downloader:'com.dv.adm'}});
+ await x.torrents.validateAccount('rd','TEST_TOKEN'); x.torrents.saveAccount('rd','TEST_TOKEN');
+ assert.equal(x.torrents.accounts().rd.key,'TEST_TOKEN');
+ assert.equal(x.store.setting('playerMovie'),'org.videolan.vlc');
+ assert.equal(x.store.setting('downloader'),'com.dv.adm');
+ assert.equal(JSON.parse(x.disk.get('state')).favs.movie[0],'f3');
+ assert.ok(!x.disk.get('state').includes('TEST_TOKEN'));
+ assert.equal(x.calls[0].headers.Authorization,'Bearer TEST_TOKEN');
+ await assert.rejects(()=>x.torrents.validateAccount('rd','bad key'));
+ x.torrents.saveAccount('rd',''); assert.equal(x.torrents.preferredProvider(),'');
+});
+test('source URL validation rejects unsafe protocols and catalogue-only add-ons',async()=>{
+ const x=setup(async()=>({resources:['catalog']}));
+ for(const url of ['http://example.org/manifest.json','javascript:alert(1)','https://u:p@host/manifest.json']) assert.throws(()=>x.torrents.sourceBase(url));
+ assert.equal(x.torrents.sourceBase('stremio://example.org/config/manifest.json'),'https://example.org/config');
+ await assert.rejects(()=>x.torrents.validateSource('https://example.org/manifest.json'));
+});
+test('source deduplication, preferred 1080p, seeds, and unsupported streams',()=>{
+ const {torrents:t}=setup();
+ const h='a'.repeat(40);
+ const r=t.normaliseSources([{url:'https://a/video.mp4',name:'1080p'},{url:'https://a/video.mp4',name:'duplicate'},{infoHash:h,fileIdx:0,title:'1080p seeders: 4'},{infoHash:'b'.repeat(40),title:'1080p seeders: 400'},{infoHash:'c'.repeat(40),title:'2160p seeders: 9999'},{url:'javascript:alert(1)'},{externalUrl:'https://website'},{url:'https://headers/video',behaviorHints:{proxyHeaders:{request:{Cookie:'secret'}}}}]);
+ assert.equal(r.length,4); assert.ok(r[0].url); assert.equal(r[1].seeds,400); assert.equal(r[3].quality,2160);
+});
+test('multi-file selection finds requested episode, rejects samples and respects cancellation', async()=>{
+ const {torrents:t}=setup();
+ const files=[{name:'sample.mkv'},{name:'Show.S01E01.mkv'},{name:'Show.S01E02.mkv'}];
+ assert.equal((await t.chooseVideo(files,{}, {season:1,episode:2},()=>assert.fail('must not ask'))).name,'Show.S01E02.mkv');
+ assert.equal((await t.chooseVideo(files,{fileIdx:1},null,()=>assert.fail())).name,'Show.S01E01.mkv');
+ await assert.rejects(()=>t.chooseVideo(files,{},null,async()=>null),/Cancelled/);
+});
+test('Real-Debrid resolves selected file and keeps different episodes independent',async()=>{
+ let added=0, selected=new Map();
+ const x=setup(async(url,method,body)=>{
+  const path=url.split('/rest/1.0/')[1];
+  if(path==='torrents/addMagnet') return {id:String(++added)};
+  if(path.startsWith('torrents/selectFiles/')) {selected.set(path.split('/').pop(),+new URLSearchParams(body).get('files')); return '';}
+  if(path.startsWith('torrents/info/')) {const id=path.split('/').pop(), sel=selected.get(id); return {status:sel?'downloaded':'waiting_files_selection',files:[{id:1,path:'Show.S01E01.mkv',selected:sel===1?1:0},{id:2,path:'Show.S01E02.mkv',selected:sel===2?1:0}],links:sel?['https://rd/file'+sel]:[]};}
+  if(path==='unrestrict/link') return {download:'https://cdn/video'+new URLSearchParams(body).get('link').slice(-1)+'.mkv'};
+  throw Error('unexpected '+url);
+ });
+ x.torrents.saveAccount('rd','TEST'); const stream={hash:'a'.repeat(40),fileIdx:null};
+ const a=await x.torrents.resolveSource(stream,'rd',{id:'tt1:1:1',season:1,episode:1},()=>assert.fail());
+ const b=await x.torrents.resolveSource(stream,'rd',{id:'tt1:1:2',season:1,episode:2},()=>assert.fail());
+ assert.match(a.url,/video1/); assert.match(b.url,/video2/); assert.equal(added,2);
+});
+test('AllDebrid nested file tree resolves correct episode and unlocks its link',async()=>{
+ const x=setup(async(url,method,body)=>{
+  if(url.endsWith('/magnet/upload')) return {status:'success',data:{magnets:[{id:7}]}};
+  if(url.endsWith('/magnet/status')) return {status:'success',data:{magnets:{id:7,statusCode:4}}};
+  if(url.endsWith('/magnet/files')) return {status:'success',data:{magnets:[{id:'7',files:[{n:'season',e:[{n:'Show.S02E01.mkv',l:'https://ad/one'},{n:'Show.S02E02.mkv',l:'https://ad/two'}]}]}]}};
+  if(url.endsWith('/link/unlock')) { assert.equal(new URLSearchParams(body).get('link'),'https://ad/two'); return {status:'success',data:{link:'https://cdn/two.mkv'}}; }
+  throw Error('unexpected');
+ });
+ x.torrents.saveAccount('ad','TEST');
+ const r=await x.torrents.resolveSource({hash:'b'.repeat(40)},'ad',{id:'tt1:2:2',season:2,episode:2},()=>assert.fail());
+ assert.equal(r.url,'https://cdn/two.mkv');
+});
+test('preparing source is not labelled playable, retries reuse cloud job',async()=>{
+ let added=0;
+ const x=setup(async(url)=>url.endsWith('/addMagnet')?{id:String(++added)}:{status:'downloading'});
+ x.torrents.saveAccount('rd','TEST'); const source={hash:'d'.repeat(40)};
+ for(let i=0;i<2;i++) await assert.rejects(()=>x.torrents.resolveSource(source,'rd',null,()=>{}),/Preparing/);
+ assert.equal(added,1);
+});
+test('failed title provider does not prevent other title results and no account token leaks',async()=>{
+ const x=setup(async(url)=>{ if(url.includes('/catalog/series/')) throw Error('offline'); return {metas:[{id:'tt100',name:'Test',poster:'https://image/poster.jpg'}]}; });
+ x.torrents.saveAccount('rd','PRIVATE'); const titles=await x.torrents.findTitles('test');
+ assert.equal(titles.length,1); assert.equal(titles[0].type,'movie'); assert.ok(x.calls.every(c=>!c.url.includes('PRIVATE')));
+});
+test('default IPTV tab and asynchronous torrent results preserve keyboard focus',async()=>{
+ const x=setup(async()=>({metas:[{id:'tt100',name:'Test',poster:'https://image/poster.jpg'}]}),{settings:{lockAdult:false}});
+ const s=new x.SearchScreen(x.view,{q:'test'},x.app);
+ const key=x.view.querySelector('.key'); key.focus();
+ await delay(600);
+ assert.equal(s.tab,'lumen'); assert.equal(x.w.document.activeElement,key);
+ assert.equal(s.titles.length,2); // a film and a series may share the same IMDb ID
+ assert.equal(x.view.querySelector('.sr-lumen-pane').hidden,false);
+ await s.switchTab('torrents'); assert.equal(x.view.querySelector('.sr-torrent-pane').hidden,false);
+ assert.equal(x.w.document.activeElement.dataset.tab,'torrents');
+ s.destroy();
+});
+test('rapid query changes are coalesced and old responses cannot overwrite new titles',async()=>{
+ let resolveOld; const old=new Promise(r=>resolveOld=r);
+ const x=setup(async(url)=>{ if(url.includes('search=old.')) return old; return {metas:[{id:'tt200',name:'New result'}]}; },{settings:{lockAdult:false}});
+ const s=new x.SearchScreen(x.view,{q:'old'},x.app);
+ await delay(470); s.q='new'; s.input.value='new'; s.paint(); await delay(470);
+ assert.equal(x.calls.filter(c=>c.url.includes('/catalog/')).length,2);
+ resolveOld({metas:[{id:'tt100',name:'Old result'}]}); await delay(550);
+ assert.ok(s.titles.every(t=>t.name==='New result')); assert.equal(x.calls.filter(c=>c.url.includes('/catalog/')).length,4);
+ s.destroy();
+});
+test('leaving search cancels pending timers and late results do not touch detached UI',async()=>{
+ const x=setup(async()=>({metas:[]}),{settings:{lockAdult:false}});
+ const s=new x.SearchScreen(x.view,{q:'test'},x.app); s.destroy(); x.view.innerHTML='Other screen';
+ await delay(500); assert.equal(x.view.textContent,'Other screen'); assert.equal(x.calls.length,0);
+});
+test('parental control requires PIN before online tab opens',async()=>{
+ const x=setup(async()=>({metas:[]}),{pin:'1234',settings:{lockAdult:true}});
+ const s=new x.SearchScreen(x.view,{},x.app); const p=s.switchTab('torrents');
+ assert.equal(s.tab,'lumen'); assert.ok(x.w.document.querySelector('.pin'));
+ x.w.document.querySelector('.pin-key[data-k="1"]').click(); x.w.document.querySelector('.pin-key[data-k="2"]').click(); x.w.document.querySelector('.pin-key[data-k="3"]').click(); x.w.document.querySelector('.pin-key[data-k="4"]').click();
+ await delay(150); await p; assert.equal(s.tab,'torrents'); s.destroy();
+});
+test('missing source provider keeps detail usable with a path to settings',async()=>{
+ const x=setup(undefined,{settings:{lockAdult:false}}); const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Test'}},x.app);
+ await delay(10); assert.match(x.view.querySelector('#td-list').textContent,/Add a Stremio-compatible/); assert.equal(x.view.querySelector('#td-play').disabled,true); d.destroy();
+});
+test('Debrid settings render saved state without exposing API keys',()=>{
+ const x=setup(); x.torrents.saveAccount('rd','PRIVATE_TOKEN');
+ new x.SettingsScreen(x.view,{restore:{sec:'debrid'}},x.app);
+ assert.match(x.view.textContent,/Key saved/); assert.ok(!x.view.innerHTML.includes('PRIVATE_TOKEN'));
+});
+
+for (const [player, downloader] of [['org.videolan.vlc','idm.internet.download.manager'],['com.mxtech.videoplayer.ad','com.dv.adm']]) {
+ test(`movie source uses existing ${player} and ${downloader} preferences`,async()=>{
+  const x=setup(async()=>({streams:[{name:'1080p',url:'https://cdn.test/film.mp4'}]}),{settings:{lockAdult:false,playerMovie:player,downloader,torrentSource:'https://source.test'}});
+  const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);
+  await delay(20); await d.launch(false);
+  let h=x.calls.filter(c=>c.handoff).at(-1); assert.equal(h.pkg,player); assert.equal(h.options.mode,'play'); assert.equal(h.url,'https://cdn.test/film.mp4');
+  await d.launch(true); h=x.calls.filter(c=>c.handoff).at(-1); assert.equal(h.pkg,downloader); assert.equal(h.options.mode,'download');
+  assert.equal(x.store.S.recentVod[0].torrentItem.id,'tt1'); d.destroy();
+ });
+}
+test('series source uses the series player setting and restores episode choice',async()=>{
+ const x=setup(async(url)=>url.includes('/meta/')?{meta:{videos:[{id:'tt1:1:2',season:1,episode:2,title:'Second'}]}}:{streams:[{url:'https://cdn/episode.mkv'}]}, {settings:{lockAdult:false,playerMovie:'org.videolan.vlc',playerSeries:'com.mxtech.videoplayer.ad',torrentSource:'https://source.test'}});
+ const episode={id:'tt1:1:2',season:1,episode:2};
+ const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'series',name:'Series'},restore:{episode}},x.app);
+ await delay(20); await d.launch(false);
+ assert.equal(x.calls.find(c=>c.handoff).pkg,'com.mxtech.videoplayer.ad');
+ assert.equal(d.save().episode.id,episode.id);
+ assert.equal(d.onKey('back'),true); assert.equal(d.phase,'episodes'); assert.equal(d.episode,null); d.destroy();
+});
+test('invalid API response is surfaced and cannot launch a player',async()=>{
+ const x=setup(async()=>({error:'bad_token'})); x.torrents.saveAccount('rd','INVALID');
+ await assert.rejects(()=>x.torrents.resolveSource({hash:'e'.repeat(40)},'rd',null,()=>{}),/could not complete/);
+ assert.equal(x.calls.filter(c=>c.handoff).length,0);
+});

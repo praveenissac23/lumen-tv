@@ -525,6 +525,10 @@ export class HomeScreen {
   }
 
   async open(kind, id, data, row) {
+    if ((kind === 'cont' || kind === 'rv') && data.torrentItem) {
+      this.app.go('torrent', { item: data.torrentItem, restore: { episode: data.torrentEpisode } });
+      return; // Resolve a fresh Debrid URL; saved playback links may have expired.
+    }
     if (kind === 'live') {
       const ch = C.byId.live.get(id);
       if (!(await this.app.ensureUnlocked('live', ch.cat))) return;
@@ -555,6 +559,7 @@ export class HomeScreen {
     }
     if (kind === 'cont') {
       const d = row.items[+t.dataset.i];
+      if (d.torrentItem) { this.app.go('torrent', { item: d.torrentItem, restore: { episode: d.torrentEpisode } }); return true; }
       itemActions(d.key.startsWith('movie:') ? 'movie' : 'episode', d, this.app, { resumeKey: d.key }).then((c) => { if (c) this.app.reload(); });
       return true;
     }

@@ -1,9 +1,10 @@
 // Master search: on-screen keyboard + voice, instant grouped results.
 import { C, needsPin } from '../data.js';
-import { S, pushSearch, isFav } from '../store.js';
+import { S, pushSearch, isFav, setting, sessionUnlocked, unlockSession } from '../store.js';
 import { esc, hhmm, now, dayLabel, debounce } from '../util.js';
 import { focus } from '../nav.js';
-import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots } from '../ui.js';
+import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots, pinPad } from '../ui.js';
+import { findTitles } from '../torrents.js';
 import { search, suggestFrom, searchOnTv } from '../search.js';
 import { playLive, playCatchup } from '../player.js';
 import { itemActions } from '../actions.js';
@@ -16,6 +17,8 @@ export class SearchScreen {
   constructor(view, params, app) {
     this.app = app; this.view = view; this.params = params;
     this.q = params.restore?.q ?? params.q ?? '';
+    this.tab = params.restore?.tab || 'lumen'; this.dead = false; this.torrentToken = 0;
+    this.restoreTorrent = params.restore?.lastTorrent || '';
     view.innerHTML = `<div class="sr">
       <aside class="sr-kb" data-zone="srkb">
         <div class="sr-box">${icon('search')}<input class="sr-input" id="sr-input" value="${esc(this.q)}" placeholder="Search" autocomplete="off" spellcheck="false" readonly inputmode="none" tabindex="-1">
@@ -25,7 +28,11 @@ export class SearchScreen {
         <button class="f dictate" id="sr-dictate">${icon('mic')}<span>Speak or type</span><small>${window.__desktop ? 'Type on your keyboard, or press the dictation key (or Fn twice) and speak.' : 'Opens the TV keyboard. Hold the Alexa (mic) button and speak, then press Search.'}</small></button>
         <div class="sr-sugg" id="sr-sugg" data-group="sugg"></div>
       </aside>
-      <section class="sr-results" data-zone="srres"><div class="sr-scroll" data-scroll="y" data-pad="0"><div class="sr-track" id="sr-track"></div></div></section>
+      <section class="sr-results" data-zone="srres">
+        <div class="sr-tabs" data-group="srtabs"><button class="f sr-tab" data-tab="lumen">Lumen TV</button><button class="f sr-tab" data-tab="torrents">Torrents <small id="sr-torrent-count"></small></button></div>
+        <div class="sr-scroll sr-lumen-pane" data-scroll="y" data-pad="0"><div class="sr-track" id="sr-track"></div></div>
+        <div class="sr-scroll sr-torrent-pane" data-scroll="y" data-pad="0" hidden><div class="sr-track" id="sr-torrents" aria-live="polite"></div></div>
+      </section>
     </div>`;
     this.input = view.querySelector('#sr-input');
     this.run = debounce(() => this.paint(), 120);
@@ -42,9 +49,13 @@ export class SearchScreen {
     });
     view.querySelector('#sr-mic').onclick = () => app.openVoice();
     view.querySelector('#sr-dictate').onclick = () => this.dictate();
+    view.querySelector('.sr-tabs').onclick = (e) => { const b = e.target.closest('[data-tab]'); if (b) this.switchTab(b.dataset.tab); };
     // the TV keyboard types into the field; mirror it into the search
     this.input.addEventListener('blur', () => { this.input.readOnly = true; this.input.tabIndex = -1; if (this.view.contains(document.activeElement) === false) focus(this.view.querySelector('#sr-dictate')); });
     view.addEventListener('click', (e) => {
+      const torrent = e.target.closest('[data-torrent]');
+      if (torrent) { const item = this.titles?.[+torrent.dataset.torrent]; if (item) { this.lastTorrent = item.id; pushSearch(this.q); app.go('torrent', { item }); } return; }
+      if (e.target.closest('[data-torrent-retry]')) { this.lastTorrentQ = null; this.searchTorrents(); return; }
       const s = e.target.closest('[data-q]');
       if (s) { this.q = s.dataset.q; this.input.value = this.q; this.paint(); return; }
       const t = e.target.closest('.res');
@@ -53,17 +64,19 @@ export class SearchScreen {
     view.addEventListener('focused', (e) => {
       // keep result rows in view vertically
       const sec = e.target.closest('.sr-sec');
-      const tr = view.querySelector('#sr-track');
       if (!sec) return;
+      const tr = sec.closest('.sr-track');
       const y = Math.max(0, sec.offsetTop - 10);
-      const max = Math.max(0, tr.scrollHeight - view.querySelector('.sr-scroll').offsetHeight);
+      const max = Math.max(0, tr.scrollHeight - tr.parentElement.offsetHeight);
       const v = Math.min(y, max);
       tr._off = -v; tr.style.transform = `translate3d(0,${-v}px,0)`;
     });
-    this.paint();
+    this.applyTab(); this.paint();
   }
 
   paint() {
+    if (this.dead) return;
+    this.searchTorrents();
     const q = this.q.trim();
     const track = this.view.querySelector('#sr-track');
     track._off = 0; track.style.transform = '';
@@ -97,7 +110,7 @@ export class SearchScreen {
     // programmes come from the guide database a moment later
     const token = this.tvToken = (this.tvToken || 0) + 1;
     searchOnTv(q).then((progs) => {
-      if (token !== this.tvToken || this.res !== r) return;
+      if (this.dead || token !== this.tvToken || this.res !== r) return;
       r.progs = progs;
       r.total += progs.length;
       const host = track.querySelector('#sr-ontv');
@@ -111,6 +124,70 @@ export class SearchScreen {
         track.insertAdjacentHTML('afterbegin', `<section class="sr-sec sr-best" data-group="best">${this.bestCard(r.best, now())}</section>`);
       }
     }).catch(() => {});
+  }
+
+  applyTab() {
+    this.view.querySelectorAll('[data-tab]').forEach((b) => { b.classList.toggle('on', b.dataset.tab === this.tab); b.setAttribute('aria-pressed', String(b.dataset.tab === this.tab)); });
+    this.view.querySelector('.sr-lumen-pane').hidden = this.tab !== 'lumen';
+    this.view.querySelector('.sr-torrent-pane').hidden = this.tab !== 'torrents';
+  }
+  async switchTab(tab) {
+    if (tab === 'torrents' && setting('lockAdult') && !sessionUnlocked('torrents', 'catalogue')) {
+      if (this.unlocking) return;
+      this.unlocking = true;
+      const ok = await pinPad({ title: 'Unlock online search', subtitle: 'Online titles are outside your IPTV parental categories.', check: (v) => v === S.pin });
+      this.unlocking = false;
+      if (this.dead) return;
+      if (!ok) { focus(this.view.querySelector('[data-tab="lumen"]')); return; }
+      unlockSession('torrents', 'catalogue');
+    }
+    this.tab = tab; this.applyTab();
+    focus(this.view.querySelector(`[data-tab="${tab}"]`));
+  }
+  searchTorrents() {
+    const q = this.q.trim();
+    if (this.lastTorrentQ === q) return;
+    this.lastTorrentQ = q;
+    clearTimeout(this.torrentTimer);
+    const token = ++this.torrentToken;
+    const host = this.view.querySelector('#sr-torrents'), count = this.view.querySelector('#sr-torrent-count');
+    const hadFocus = host.contains(document.activeElement);
+    host._off = 0; host.style.transform = '';
+    this.titles = [];
+    count.textContent = '';
+    host.innerHTML = `<p class="sr-count">${q.length < 2 ? 'Type at least two characters to search films and series.' : 'Searching films and series…'}</p>`;
+    if (hadFocus) focus(this.view.querySelector('[data-tab="torrents"]'));
+    if (q.length < 2) return;
+    // Independent from IPTV, debounced so remote typing never queues dozens of requests.
+    this.torrentTimer = setTimeout(async () => {
+      if (this.torrentInFlight) return; // latest query resumes when the active request finishes
+      this.torrentInFlight = true;
+      try {
+        const titles = await findTitles(q);
+        if (this.dead || token !== this.torrentToken) return;
+        this.titles = titles; count.textContent = `(${titles.length})`;
+        const row = (type, label) => {
+          const entries = titles.map((m, i) => ({ m, i })).filter(({ m }) => m.type === type);
+          return entries.length ? `<section class="sr-sec"><h2>${label}<small>${entries.length}</small></h2><div class="row-clip" data-scroll="x" data-pad="40" data-anchor="start"><div class="row-track" data-group="torrent-${type}">${entries.map(({ m, i }) => `<button class="f tile poster-tile" data-torrent="${i}">${poster(m)}<span class="pt-cap"><b>${esc(m.name)}</b><small>${esc(m.year)}</small></span></button>`).join('')}</div></div></section>` : '';
+        };
+        host.innerHTML = `<p class="sr-count">${titles.length ? 'Online titles · Select a title to find sources' : 'No online titles found. Try fewer words.'}</p>${row('movie', 'Films')}${row('series', 'Series')}`;
+        if (this.restoreTorrent && this.tab === 'torrents' && document.activeElement === this.view.querySelector('[data-tab="torrents"]')) {
+          const i = titles.findIndex((m) => m.id === this.restoreTorrent);
+          if (i >= 0) focus(host.querySelector(`[data-torrent="${i}"]`));
+        }
+        this.restoreTorrent = '';
+      } catch (e) {
+        if (this.dead || token !== this.torrentToken) return;
+        host.innerHTML = `<p class="sr-count">${esc(e.message)}</p><button class="f btn" data-torrent-retry>Retry search</button>`;
+      } finally {
+        this.torrentInFlight = false;
+        if (!this.dead && token !== this.torrentToken && this.q.trim().length >= 2) { this.lastTorrentQ = null; this.searchTorrents(); }
+      }
+    }, 450);
+  }
+
+  resultFocus() {
+    return this.view.querySelector(this.tab === 'torrents' ? '.sr-torrent-pane .f' : '.sr-lumen-pane .f') || this.view.querySelector(`[data-tab="${this.tab}"]`);
   }
 
   bestCard(b, t) {
@@ -186,12 +263,12 @@ export class SearchScreen {
       else itemActions(kind, C.byId[kind].get(t.dataset.id), this.app);
       return true;
     }
-    if (k === 'submit') { pushSearch(this.q); const f = this.view.querySelector('.sr-results .f'); if (f) focus(f); return true; }
+    if (k === 'submit') { pushSearch(this.q); focus(this.resultFocus()); return true; }
     if (a && a.closest('.kb') && k === 'right') {
       const keys = [...this.view.querySelectorAll('.kb .key')];
       const i = keys.indexOf(a);
       const atEdge = (i < 36 && i % 6 === 5) || i === keys.length - 1;
-      if (atEdge) { const f = this.view.querySelector('.sr-results .f'); if (f) focus(f); return true; }
+      if (atEdge) { focus(this.view.querySelector(`[data-tab="${this.tab}"]`)); return true; }
     }
     if (/^d\d$/.test(k) && a && !a.matches('input')) { this.q += k.slice(1); this.input.value = this.q; this.run(); return true; }
     return false;
@@ -207,10 +284,11 @@ export class SearchScreen {
       return;
     }
     p.then((text) => {
+      if (this.dead) return;
       if (text == null) { focus(this.view.querySelector('#sr-dictate')); return; }
       this.q = text; this.input.value = text; this.params.voice = true; this.params.q = text;
       this.paint();
-      setTimeout(() => focus(this.view.querySelector('.sr-results .f') || this.view.querySelector('#sr-dictate')), 50);
+      setTimeout(() => { if (!this.dead) focus(this.resultFocus()); }, 50);
     });
   }
 
@@ -232,10 +310,12 @@ export class SearchScreen {
       return;
     }
     if (this.params.ime) { focus(this.view.querySelector('#sr-dictate')); return; }
-    if (this.params.voice && this.view.querySelector('.sr-results .f')) { focus(this.view.querySelector('.sr-results .f')); return; }
+    if (this.params.restore?.tab === 'torrents') { focus(this.view.querySelector('[data-tab="torrents"]')); return; }
+    if (this.params.voice) { focus(this.resultFocus()); return; }
     focus(this.view.querySelector('.key'));
   }
-  save() { return { q: this.q }; }
+  save() { return { q: this.q, tab: this.tab, lastTorrent: this.lastTorrent }; }
+  destroy() { this.dead = true; ++this.tvToken; ++this.torrentToken; clearTimeout(this.torrentTimer); this.run.cancel(); }
 }
 
 export function tryLines() {

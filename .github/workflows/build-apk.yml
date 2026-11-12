@@ -3,7 +3,7 @@
 name: Build APK
 on:
   push:
-    branches: [main]
+    branches: [main, feature/debrid-search]
     paths-ignore: ['README.md', 'design/**', 'tools/shoot.py', 'tools/bridge_test.py', 'mac/**', '.github/workflows/build-mac.yml']
   workflow_dispatch:
 
@@ -25,13 +25,28 @@ jobs:
         with: { distribution: temurin, java-version: 17, cache: gradle }
 
       - name: Build the TV interface
-        run: npm ci && bash tools/build-web.sh
+        run: npm ci && npm test && bash tools/build-web.sh
+
+      - uses: actions/setup-python@v5
+        with: { python-version: '3.12' }
+
+      - name: Check TV navigation in Chromium
+        run: |
+          python -m pip install playwright==1.58.0
+          python -m playwright install --with-deps chromium
+          python tools/test-navigation.py
 
       - name: Restore the signing key (private repository secret)
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
+          KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: |
-          if [ -n "$KEYSTORE_B64" ]; then echo "$KEYSTORE_B64" | base64 -d > android/app/lumen.jks; echo "Signing with the Lumen key"; else echo "::warning::KEYSTORE_B64 secret not set: using a temporary key, so this build won't install as an update"; fi
+          if [ -z "$KEYSTORE_B64" ] || [ -z "$KEYSTORE_PASSWORD" ]; then
+            echo "::error::The original Lumen signing secrets are required. Refusing to publish a temporary-key update."
+            exit 1
+          fi
+          printf '%s' "$KEYSTORE_B64" | base64 -d > android/app/lumen.jks
+          chmod 600 android/app/lumen.jks
 
       - name: Build the APK
         working-directory: android
@@ -40,7 +55,45 @@ jobs:
           KEYSTORE_PASSWORD: ${{ secrets.KEYSTORE_PASSWORD }}
         run: chmod +x gradlew && ./gradlew --no-daemon assembleRelease
 
+      - name: Verify update signature
+        env:
+          EXPECTED_CERT_SHA256: 2a12c7713f69a1178ebd87303cb14ed0dc2f0d1fafd28d0676355dc93aa236b7
+        run: |
+          APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
+          "$APKSIGNER" verify --print-certs android/app/build/outputs/apk/release/app-release.apk > /tmp/lumen-signature.txt
+          python3 - <<'PY'
+          import os, re
+          text = open('/tmp/lumen-signature.txt').read()
+          digest = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]+)', text)
+          assert digest and digest[1].lower() == os.environ['EXPECTED_CERT_SHA256'], 'APK must match the installed build 36 signing certificate'
+          PY
+
+      - name: Check update identity and version
+        env:
+          BUILD_NUMBER: ${{ github.run_number }}
+        run: |
+          AAPT=$(find "$ANDROID_HOME/build-tools" -name aapt | sort -V | tail -1)
+          "$AAPT" dump badging android/app/build/outputs/apk/release/app-release.apk > /tmp/lumen-badging.txt
+          python3 - <<'PY'
+          import os, re
+          text = open('/tmp/lumen-badging.txt').read()
+          package = re.search(r"package: name='([^']+)' versionCode='(\d+)'", text)
+          assert package and package[1] == 'tv.lumen.app', 'Update must keep the installed application ID'
+          assert int(package[2]) == int(os.environ['BUILD_NUMBER']) and int(package[2]) > 36, 'Update version must exceed build 36'
+          assert os.path.getsize('android/app/build/outputs/apk/release/app-release.apk') < 2000000, 'Unexpected APK size increase'
+          PY
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: lumen-build-${{ github.run_number }}
+          path: |
+            android/app/build/outputs/apk/release/app-release.apk
+            build/navigation-shots/
+          if-no-files-found: ignore
+
       - name: Publish the release
+        if: github.ref == 'refs/heads/main'
         env:
           GH_TOKEN: ${{ github.token }}
           NOTES: ${{ github.event.head_commit.message }}

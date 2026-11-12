@@ -18,10 +18,11 @@ import { esc } from '../util.js';
 import { focus, focusFirst } from '../nav.js';
 import { icon, toast, sheet, form, pinPad } from '../ui.js';
 import * as N from '../native.js';
+import { accounts, saveAccount, validateAccount, validateSource, preferredProvider, PROVIDERS } from '../torrents.js';
 
 const SECTIONS = [
   ['playlists', 'Playlists', 'list'], ['home', 'Home screen', 'home'], ['langs', 'Languages', 'globe'], ['look', 'Theme and wallpaper', 'image'],
-  ['downloads', 'Downloads and players', 'download'], ['subs', 'Subtitles', 'subtitles'], ['phone', 'Phone remote', 'phone'],
+  ['downloads', 'Downloads and players', 'download'], ['debrid', 'Debrid and torrents', 'globe'], ['subs', 'Subtitles', 'subtitles'], ['phone', 'Phone remote', 'phone'],
   ['voice', 'Voice search', 'mic'], ['parental', 'Parental control', 'lock'], ['cats', 'Categories', 'eyeOff'],
   ['playback', 'Playback', 'play'], ['guide', 'TV guide', 'guide'], ['about', 'About', 'tv'],
 ];
@@ -196,6 +197,17 @@ export class SettingsScreen {
       </div>`;
   }
 
+  debrid() {
+    const a = accounts();
+    return `<h1>Debrid and torrents</h1><p class="st-intro">Search IPTV and online titles together. Connect your own accounts and a Stremio-compatible source add-on. Lumen TV remains your default search tab.</p>
+      ${Object.entries(PROVIDERS).map(([id, name]) => this.row(name, a[id]?.key ? '<span class="pill on">Key saved</span>' : '<span class="pill">Connect</span>', 'debrid-key', id, a[id]?.key ? (preferredProvider() === id ? 'Preferred provider · Verify or disconnect' : 'Verify or disconnect') : 'Use an API key from your provider account')).join('')}
+      ${this.row('Preferred Debrid provider', esc(PROVIDERS[preferredProvider()] || 'Connect an account first'), 'debrid-preferred')}
+      <h2>Source search</h2>
+      ${this.row('Source add-on', esc(setting('torrentSourceName') || 'Add provider'), 'torrent-source', '', 'Paste an HTTPS Stremio manifest URL. Your Debrid API keys are not sent to this provider.')}
+      ${this.row('Preferred quality', (setting('torrentQuality') || 1080) + 'p', 'torrent-quality', '', 'Prefer this quality, then seed count. Direct links are listed first.')}
+      <div class="st-note"><p>API keys are stored separately from IPTV settings in this app’s private storage. Online searches use Cinemeta for title information. Source availability is checked when selected; some torrents need preparation in your Debrid account.</p><p>When parental control is enabled, opening the Torrents tab requires your PIN because online titles are outside your IPTV categories.</p></div>`;
+  }
+
   subs() {
     const langs = setting('subLangs') || [];
     const key = setting('osKey');
@@ -259,6 +271,48 @@ export class SettingsScreen {
   }
 
   async act(a, arg, btn) {
+    if (a === 'debrid-key') {
+      const existing = accounts()[arg]?.key;
+      let action = 'replace';
+      if (existing) action = await sheet({ title: PROVIDERS[arg], options: [{ label: 'Check connection', value: 'check' }, { label: 'Replace API key', value: 'replace' }, { label: 'Disconnect account', value: 'remove' }] });
+      if (!action) { this.repaint(btn); return; }
+      if (action === 'remove') { saveAccount(arg, ''); toast('Account disconnected'); this.repaint(btn); return; }
+      let key = existing;
+      if (action === 'replace') {
+        const v = await form({ title: 'Connect ' + PROVIDERS[arg], note: arg === 'rd' ? 'Get your personal API token from real-debrid.com/apitoken. Your website password is not needed.' : 'Create an API key at alldebrid.com/apikeys. Your website password is not needed.', fields: [{ name: 'key', label: 'API key', type: 'password', required: true }], submit: 'Connect' });
+        if (!v) { this.repaint(btn); return; }
+        key = v.key;
+      }
+      toast('Checking your account…');
+      try { await validateAccount(arg, key); if (action !== 'check') saveAccount(arg, key); toast(PROVIDERS[arg] + ' connected'); }
+      catch (e) { toast(e.message, 'err'); }
+      if (this.view.isConnected) this.repaint(btn); return;
+    }
+    if (a === 'debrid-preferred') {
+      const list = Object.keys(PROVIDERS).filter((id) => accounts()[id]?.key);
+      if (!list.length) { toast('Connect a Debrid account first'); return; }
+      const id = await sheet({ title: 'Preferred provider', options: list.map((id) => ({ label: PROVIDERS[id], value: id, on: preferredProvider() === id })) });
+      if (id) setting('debridPreferred', id);
+      this.repaint(btn); return;
+    }
+    if (a === 'torrent-quality') {
+      const q = await sheet({ title: 'Preferred quality', options: [1080, 2160, 720].map((n) => ({ label: n + 'p', value: String(n), on: +(setting('torrentQuality') || 1080) === n })) });
+      if (q) setting('torrentQuality', +q);
+      this.repaint(btn); return;
+    }
+    if (a === 'torrent-source') {
+      let action = 'edit';
+      if (setting('torrentSource')) action = await sheet({ title: 'Source provider', options: [{ label: 'Replace provider', value: 'edit' }, { label: 'Remove provider', value: 'remove' }] });
+      if (action === 'remove') { setting('torrentSource', ''); setting('torrentSourceName', ''); this.repaint(btn); return; }
+      if (!action) { this.repaint(btn); return; }
+      const v = await form({ title: 'Source provider', note: 'Paste the manifest URL of a Stremio-compatible stream add-on you trust. Lumen does not bundle a torrent index or engine.', fields: [{ name: 'url', label: 'Manifest URL', value: setting('torrentSource') ? setting('torrentSource') + '/manifest.json' : '', placeholder: 'https://your-provider/manifest.json', required: true }], submit: 'Connect' });
+      if (v) {
+        toast('Checking the source provider…');
+        try { const p = await validateSource(v.url); setting('torrentSource', p.base); setting('torrentSourceName', p.name); toast('Source provider added'); }
+        catch (e) { toast(e.message, 'err'); }
+      }
+      if (this.view.isConnected) this.repaint(btn); return;
+    }
     if (a === 'noop') return;
     if (a === 'update') { installUpdate(); return; }
     if (a === 'checkupd') { toast('Checking for updates'); const u = await checkForUpdate({ quiet: false }); if (u) { this.show('about'); installUpdate(); } return; }
