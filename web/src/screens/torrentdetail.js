@@ -22,10 +22,11 @@ export class TorrentDetailScreen {
         <button class="f btn" id="td-settings">${icon('gear')}Debrid settings</button></aside>
       <section class="td-main"><div class="td-heading"><h1 id="td-heading">${item.type === 'series' ? 'Choose an episode' : 'Choose a source'}</h1>
         <button class="f chip" id="td-provider">${esc(PROVIDERS[preferredProvider()] || 'Connect account')}</button></div>
+        <div class="td-actions" data-group="tdactions"><button class="f btn primary" id="td-play">${icon('play')}${player ? 'Play in ' + esc(player) : 'Play'}</button><button class="f btn" id="td-download">${icon('download')}${downloader ? 'Download with ' + esc(downloader) : 'Download'}</button></div>
+        <p class="td-play-hint">Press OK on a source to ${player ? 'play in ' + esc(player) : 'play'}. Right opens Download.</p>
         <div id="td-seasons" class="chips" data-group="tdseasons"></div>
         <div class="td-scroll" data-scroll="y" data-pad="14"><div id="td-list" class="td-list" data-group="tdlist"><p class="st-intro">Loading…</p></div></div>
         <p id="td-status" class="td-status" role="status"></p>
-        <div class="td-actions" data-group="tdactions"><button class="f btn primary" id="td-play">${icon('play')}${player ? 'Play in ' + esc(player) : 'Play'}</button><button class="f btn" id="td-download">${icon('download')}${downloader ? 'Download with ' + esc(downloader) : 'Download'}</button></div>
         <small class="td-foot">Uses your existing Lumen player and download settings.</small>
       </section></div>`;
     view.querySelector('#td-settings').onclick = () => app.go('settings', { restore: { sec: 'debrid' } });
@@ -38,7 +39,7 @@ export class TorrentDetailScreen {
       if (!b) return;
       if (b.hasAttribute('data-retry')) return this.loadSources(true, true);
       if (b.dataset.episode != null) { this.episode = this.episodes[+b.dataset.episode]; this.index = 0; this.loadSources(true); }
-      else { this.index = +b.dataset.source; this.markSelection(); this.launch(false); }
+      else this.activateSource(b);
     };
     view.addEventListener('focused', (e) => { if (e.target.dataset.source != null) { this.index = +e.target.dataset.source; this.markSelection(); } });
     this.actions(false);
@@ -100,13 +101,38 @@ export class TorrentDetailScreen {
       if (this.dead || token !== this.token) return;
       this.sources = sources;
       this.index = Math.min(this.index, Math.max(0, sources.length - 1));
-      const rows = sources.map((s, i) => `<button class="f td-source ${i === this.index ? 'selected' : ''}" data-source="${i}"><b>${s.quality ? s.quality + 'p' : 'Quality unknown'} <span class="tag">${s.url ? 'Direct link' : 'Debrid playback'}</span></b><span>${esc(s.text)}</span><small>${[esc(s.sourceLabel), s.size ? bytes(s.size) : '', s.seeds != null ? s.seeds.toLocaleString() + ' seeds' : ''].filter(Boolean).join(' · ')}</small></button>`).join('');
+      const rows = sources.map((s, i) => {
+        const via = this.sourceProvider(s);
+        return `<button class="f td-source ${via ? 'td-debrid' : ''} ${i === this.index ? 'selected' : ''}" data-source="${i}"><b>${s.quality ? s.quality + 'p' : 'Quality unknown'} <span class="td-route ${via ? 'td-route-debrid' : ''}">${icon(via ? 'link' : 'play')}<span data-route>${esc(via || (s.hash ? 'Debrid account needed' : 'Direct stream'))}</span></span></b><span>${esc(s.text)}</span><small>${[esc(s.sourceLabel), s.size ? bytes(s.size) : '', s.seeds != null ? s.seeds.toLocaleString() + ' seeds' : ''].filter(Boolean).join(' · ')}</small><span class="td-row-play">${icon('play')}OK · ${playerLabel(this.item)}</span></button>`;
+      }).join('');
       this.list((rows || '<p class="st-intro">No supported internet torrents were found for this title. Try another source or your IPTV library.</p>') + '<button class="f btn" data-retry>Search sources again</button>', move);
       this.actions(!!sources.length);
       this.status(sources.sourceSummary || 'Search complete.');
+      if (document.activeElement === this.view.querySelector('#td-provider') && !document.querySelector('#overlays .sheet-wrap')) focus(this.view.querySelector(`[data-source="${this.index}"]`));
     } catch (e) {
       if (!this.dead && token === this.token) { this.status(e.message); this.list('<button class="f btn" data-retry>Retry sources</button>', move); }
     }
+  }
+  sourceProvider(source) {
+    if (source.hash && !source.url) return PROVIDERS[this.provider || preferredProvider()] || '';
+    // Label only known provider hostnames or explicit add-on provider markers.
+    let host = ''; try { host = new URL(source.url).hostname; } catch { }
+    if (/(^|\.)real-debrid\.(com|net)$/.test(host) || /\[RD[+ ]?\]/i.test(source.text)) return 'Real-Debrid link';
+    if (/(^|\.)alldebrid\.(com|net)$/.test(host) || /\[AD[+ ]?\]/i.test(source.text)) return 'AllDebrid link';
+    return '';
+  }
+  activateSource(button) {
+    const index = +button.dataset.source;
+    if (!Number.isInteger(index) || !this.sources?.[index]) return;
+    this.index = index; this.markSelection(); this.launch(false);
+  }
+  refreshRoutes() {
+    this.view.querySelectorAll('[data-source]').forEach(button => {
+      const source = this.sources[+button.dataset.source], provider = this.sourceProvider(source);
+      button.classList.toggle('td-debrid', !!provider);
+      button.querySelector('.td-route').classList.toggle('td-route-debrid', !!provider);
+      button.querySelector('[data-route]').textContent = provider || (source.hash ? 'Debrid account needed' : 'Direct stream');
+    });
   }
   markSelection() { this.view.querySelectorAll('[data-source]').forEach((b) => b.classList.toggle('selected', +b.dataset.source === this.index)); }
   async pickProvider() {
@@ -115,7 +141,7 @@ export class TorrentDetailScreen {
     if (!options.length) { this.app.go('settings', { restore: { sec: 'debrid' } }); return; }
     const p = await sheet({ title: 'Use Debrid account', options });
     if (this.dead) return;
-    if (p) { this.provider = p; this.view.querySelector('#td-provider').textContent = PROVIDERS[p]; }
+    if (p) { this.provider = p; this.view.querySelector('#td-provider').textContent = PROVIDERS[p]; this.refreshRoutes(); }
     focus(this.view.querySelector('#td-provider'));
   }
   async launch(download) {
@@ -145,13 +171,23 @@ export class TorrentDetailScreen {
     finally { if (alive()) { this.busy = false; this.actions(true); if (!this.view.contains(document.activeElement)) focus(this.view.querySelector(`[data-source="${this.index}"]`)); } }
   }
   onKey(k) {
+    const row = document.activeElement?.closest('[data-source]');
+    if (row && this.view.contains(row)) {
+      if (['ok', 'play', 'playpause'].includes(k)) { this.activateSource(row); return true; }
+      if (k === 'right') { focus(this.view.querySelector('#td-download')); return true; }
+    }
     if (k === 'back' && this.episode && this.item.type === 'series' && this.phase === 'sources') {
       ++this.token; this.episode = null; this.paintEpisodes(true); return true;
     }
     if (k === 'left' && document.activeElement?.hasAttribute('data-source')) { focus(this.view.querySelector('#td-settings')); return true; }
     return false;
   }
-  focus() { if (!document.querySelector('#overlays .sheet-wrap')) focus(this.view.querySelector('#td-provider')); }
+  focus() { if (!document.querySelector('#overlays .sheet-wrap')) focus(this.view.querySelector(`[data-source="${this.index}"]`) || this.view.querySelector('#td-provider')); }
   save() { return { episode: this.episode, season: this.season, index: this.index }; }
   destroy() { this.dead = true; ++this.token; }
+}
+
+function playerLabel(item) {
+  const name = N.KNOWN_APPS.find(a => a.pkg === setting(item.type === 'series' ? 'playerSeries' : 'playerMovie'))?.name;
+  return name ? 'Play in ' + esc(name) : 'Play';
 }

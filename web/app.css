@@ -808,3 +808,13 @@ body:not([data-screen="home"]) .upd-bar { display: none; }
 body.lite .tile, body.lite .poster-tile { transition:transform .12s var(--ease),box-shadow .12s var(--ease); }
 body.lite .tile:focus, body.lite .poster-tile:focus { transform:scale(1.035); box-shadow:0 0 0 3px var(--brass); }
 body.lite .row-track, body.lite .home-track, body.lite .sr-track, body.lite .st-track, body.lite .td-list { transition:transform .16s var(--ease); }
+
+/* Torrent playback is a row action, with download controls kept above the list. */
+.td-play-hint { color:var(--text-2); font-size:21px; margin:12px 0 18px; }
+.td-actions { flex:none; margin-top:0; }
+.td-route { display:inline-flex; align-items:center; gap:7px; margin-left:14px; padding:6px 12px; border-radius:8px; font-size:20px; background:var(--raised); }
+.td-route .ic { width:20px; height:20px; }
+.td-route-debrid { background:#174b3c; color:#b5ffdc; border:1px solid #61d5a4; }
+.td-source.td-debrid { border-left:5px solid #61d5a4; }
+.td-source > .td-row-play { display:flex; align-items:center; gap:8px; color:var(--text); font-size:20px; font-weight:600; }
+.td-row-play .ic { width:19px; height:19px; }

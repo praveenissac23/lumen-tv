@@ -263,3 +263,37 @@ for(const [code,message] of [[10,/account verification/],[11,/account verificati
   await assert.rejects(()=>x.torrents.resolveSource({hash:'a'.repeat(40)},'rd',null,()=>{}),message);
  });
 }
+
+for(const provider of ['rd','ad']) test(provider+' source OK resolves through Debrid and opens VLC once without pressing Play',async()=>{
+ const x=setup(async(url)=>{
+  if(url.includes('/stream/'))return {streams:[{infoHash:'b'.repeat(40),title:'1080p seeders: 30'}]};
+  if(url.endsWith('/addMagnet'))return {id:'8'};
+  if(url.includes('/torrents/info/'))return {status:'downloaded',files:[{id:1,path:'Film.mkv',selected:1}],links:['https://rd.test/link']};
+  if(url.endsWith('/unrestrict/link'))return {download:'https://cdn.test/rd.mkv'};
+  if(url.endsWith('/magnet/upload'))return {status:'success',data:{magnets:[{id:8}]}};
+  if(url.endsWith('/magnet/status'))return {status:'success',data:{magnets:{id:8,statusCode:4}}};
+  if(url.endsWith('/magnet/files'))return {status:'success',data:{magnets:[{id:8,files:[{n:'Film.mkv',l:'https://ad.test/link'}]}]}};
+  if(url.endsWith('/link/unlock'))return {status:'success',data:{link:'https://cdn.test/ad.mkv'}};
+  throw Error('Unexpected endpoint');
+ },{settings:{playerMovie:'org.videolan.vlc'}});
+ x.torrents.saveAccount(provider,'TEST');
+ const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);
+ await delay(20);const row=x.view.querySelector('[data-source="0"]');row.focus();
+ assert.ok(row.classList.contains('td-debrid'));assert.match(row.textContent,provider==='rd'?/Real-Debrid/:/AllDebrid/);assert.match(row.textContent,/OK · Play in VLC/);
+ assert.equal(d.onKey('ok'),true);d.onKey('ok');await delay(20);
+ const handoffs=x.calls.filter(c=>c.handoff);assert.equal(handoffs.length,1);assert.equal(handoffs[0].pkg,'org.videolan.vlc');assert.equal(handoffs[0].url,'https://cdn.test/'+provider+'.mkv');d.destroy();
+});
+test('pointer click on a source starts selected stream and Right reaches Download immediately',async()=>{
+ const x=setup(async()=>({streams:[{url:'https://cdn.test/first.mp4'},{url:'https://cdn.test/second.mp4'}]}),{settings:{playerMovie:'org.videolan.vlc'}});
+ const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(20);
+ const row=x.view.querySelector('[data-source="1"]');row.querySelector('b').click();await delay(10);
+ assert.equal(x.calls.find(c=>c.handoff).url,'https://cdn.test/second.mp4');row.focus();assert.equal(d.onKey('right'),true);assert.equal(x.w.document.activeElement.id,'td-download');
+ assert.ok(x.view.querySelector('.td-actions').compareDocumentPosition(x.view.querySelector('.td-scroll'))&4);d.destroy();
+});
+test('Debrid badges update when account changes and known direct links show provider clearly',async()=>{
+ const x=setup(async()=>({streams:[{infoHash:'c'.repeat(40)},{url:'https://download.real-debrid.com/video.mkv'}]}));x.torrents.saveAccount('rd','TEST');x.torrents.saveAccount('ad','TEST');
+ const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(20);
+ d.provider='ad';d.refreshRoutes();const routes=[...x.view.querySelectorAll('[data-route]')].map(n=>n.textContent);
+ assert.ok(routes.includes('AllDebrid'));assert.ok(routes.includes('Real-Debrid link'));
+ assert.equal(d.sourceProvider({url:'https://real-debrid.com.evil.test/video',text:''}),'');d.destroy();
+});

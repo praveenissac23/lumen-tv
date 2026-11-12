@@ -29,7 +29,7 @@ try:
     page.add_init_script('localStorage.setItem("c:state",'+json.dumps(json.dumps(seed))+');')
     page.route('https://v3-cinemeta.strem.io/**', lambda route: route.fulfill(json={'metas':[meta]} if '/catalog/movie/' in route.request.url else {'metas':[]}))
     page.route('https://source.test/**', lambda route: route.fulfill(json={'streams':[{'name':'1080p','title':'English · 2 GB','url':'https://cdn.test/video.mp4'},{'name':'720p','infoHash':'a'*40,'title':'seeders: 123'}]}))
-    page.route('https://torrentio.strem.fun/**', lambda route: route.fulfill(json={'streams':[{'name':'1080p','title':'Internet release · seeders: 999','infoHash':'b'*40,'fileIdx':0}]}))
+    page.route('https://torrentio.strem.fun/**', lambda route: route.fulfill(json={'streams':[*({'name':'1080p','title':'Internet release · seeders: 999','infoHash':format(i+1,'040x'),'fileIdx':0} for i in range(40))]}))
     page.goto(f'http://127.0.0.1:{server.server_port}/index.html')
     page.wait_for_function('window.__bootMs !== undefined')
     def focused():
@@ -53,9 +53,23 @@ try:
     assert page.locator('#td-play').is_enabled()
     assert 'Internet · Torrentio' in page.locator('[data-source="0"]').inner_text()
     assert 'internet torrents' in page.locator('#td-status').inner_text()
-    for key in ['ArrowDown','ArrowDown','ArrowUp','ArrowLeft','ArrowRight']:
-        page.keyboard.press(key)
+    # OK on the remote routes the focused row straight to playback, once.
+    page.evaluate("window.__plays=[];__app.current().ctl.launch=function(download){window.__plays.push({index:this.index,download})}")
+    page.locator('[data-source="0"]').focus()
+    page.keyboard.press('Enter')
+    assert page.evaluate('JSON.stringify(__plays)') == '[{"index":0,"download":false}]'
+    assert 'OK · Play' in page.locator('[data-source="0"]').inner_text()
+    for _ in range(12):
+        page.keyboard.press('ArrowDown')
         focused()
+    assert page.evaluate('document.activeElement.hasAttribute("data-source")')
+    page.keyboard.press('Enter')
+    assert page.evaluate('__plays.length') == 2
+    assert page.evaluate('__plays[1].index > 0 && !__plays[1].download')
+    assert page.locator('#td-play').evaluate('(b)=>{const r=b.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight}')
+    page.keyboard.press('ArrowRight')
+    assert page.evaluate('document.activeElement.id') == 'td-download'
+    focused()
     page.keyboard.press('Escape')
     page.wait_for_selector('[data-torrent="0"]')
     assert page.locator('[data-tab=torrents]').get_attribute('aria-pressed') == 'true'
