@@ -60,12 +60,14 @@ jobs:
           EXPECTED_CERT_SHA256: 2a12c7713f69a1178ebd87303cb14ed0dc2f0d1fafd28d0676355dc93aa236b7
         run: |
           APKSIGNER=$(find "$ANDROID_HOME/build-tools" -name apksigner | sort -V | tail -1)
-          "$APKSIGNER" verify --print-certs android/app/build/outputs/apk/release/app-release.apk > /tmp/lumen-signature.txt
+          "$APKSIGNER" verify android/app/build/outputs/apk/release/app-release.apk
+          keytool -J-Duser.language=en -printcert -jarfile android/app/build/outputs/apk/release/app-release.apk > /tmp/lumen-signature.txt
           python3 - <<'PY'
           import os, re
           text = open('/tmp/lumen-signature.txt').read()
-          digest = re.search(r'Signer #1 certificate SHA-256 digest: ([0-9a-fA-F]+)', text)
-          assert digest and digest[1].lower() == os.environ['EXPECTED_CERT_SHA256'], 'APK must match the installed build 36 signing certificate'
+          digest = re.search(r'SHA256:\s*([0-9a-fA-F:]+)', text)
+          assert digest and digest[1].replace(':', '').lower() == os.environ['EXPECTED_CERT_SHA256'], 'APK must match the installed build 36 signing certificate'
+          print('APK signature valid; certificate matches installed build 36.')
           PY
 
       - name: Check update identity and version
