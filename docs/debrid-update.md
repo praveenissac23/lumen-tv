@@ -25,12 +25,15 @@ Original APK SHA-256: `9cd34b93e2f53b77ef7055f483614704c7ced7b9285c4af880b4f2f38
 - `npm run build`: passes. Bundled JavaScript ~250 KB versus ~225 KB at baseline; CSS ~4 KB larger. Development-only test dependencies are not included in the APK.
 - Python browser test syntax compiles; workflow YAML parses; `git diff --check` passes.
 
-## Checks still required
+## GitHub checks completed
 
-- Run `python tools/test-navigation.py` in real Chromium. This environment cannot launch local Chromium; the provided cloud browser cannot reach the local server. The workflow now runs this check before APK compilation/publication.
-- Build the signed APK through GitHub Actions using the existing signing secrets. No Android SDK or signing private key is present locally.
-- Confirm APK application ID remains `tv.lumen.app`, version code is higher than the installed version, and certificate fingerprint matches build 36.
-- Perform actual TV D-pad/Back/long-press checks, upgrade-in-place retention checks, VLC/MX playback and ADM/1DM downloads with a real subscription. Mocked tests do not verify provider account limits, region/network behaviour or real media playback.
+The final branch candidate passed all checks in [build 40](https://github.com/praveenissac23/lumen-tv/actions/runs/43152566935): service/DOM tests, real Chromium navigation (including About remaining on screen), Android release compilation, APK signature verification, certificate match against build 36, package identity, newer version code, and APK size limits.
+
+An earlier candidate was 1,382,600 bytes versus 1,373,363 bytes for build 36. No new runtime dependencies are bundled.
+
+## Remaining practical validation
+
+- Actual TV D-pad/Back/long-press checks, upgrade-in-place retention, VLC/MX playback and ADM/1DM downloads with a real subscription still require a device and account. Mocked tests do not verify provider account limits, region/network behaviour or real media playback.
 - A source add-on must be configured by the user; no torrent index is bundled. HTTP(S) direct streams and v1 hexadecimal info hashes are supported. Streams requiring custom HTTP headers, external web pages, or unsupported hash formats are excluded.
 
-No APK has been built or published from this work yet. No existing TV installation or remote repository has been changed.
+The release workflow publishes only main-branch builds after all checks pass. The original uploaded APK remains unchanged. The same app ID and certificate allow the installed application's updater to install the newer version in place.
