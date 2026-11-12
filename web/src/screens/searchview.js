@@ -262,7 +262,7 @@ export class SearchScreen {
     }
     if (a?.closest('.kb') && k === 'down') {
       const keys = [...this.view.querySelectorAll('.kb .key')], i = keys.indexOf(a);
-      if (i >= 30) { focus(this.view.querySelector('#sr-dictate')); return true; }
+      if (i >= 36) { focus(this.view.querySelector('#sr-dictate')); return true; }
     }
     if (k === 'hold' && a && a.closest('.res')) {
       const t = a.closest('.res'), kind = t.dataset.kind;

@@ -373,3 +373,7 @@ test('cancelling the nested downloader chooser returns focus to the selected sou
  assert.match(x.w.document.querySelector('.sheet').textContent,/1DM/);
  x.nav.topLayer().onKey('back');await delay(10);assert.equal(x.w.document.activeElement,row);assert.equal(x.calls.filter(c=>c.handoff).length,0);d.destroy();
 });
+
+test('Down from the last number row does not skip Space, Delete and Clear',()=>{
+ const x=setup();const s=new x.SearchScreen(x.view,{},x.app);x.view.querySelectorAll('.kb .key')[30].focus();assert.equal(s.onKey('down'),false);s.destroy();
+});

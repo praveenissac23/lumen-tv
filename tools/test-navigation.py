@@ -58,7 +58,9 @@ try:
     # Reproduce the reported Spiderman suggestion trap using a deterministic IPTV catalogue.
     page.evaluate("__C.movie=Array.from({length:5},(_,i)=>({id:'sp'+i,name:['Spiderman (2002)','Spiderman 2','Spiderman 3','Spiderman Homecoming','Spiderman Far From Home'][i],n:['spiderman 2002','spiderman 2','spiderman 3','spiderman homecoming','spiderman far from home'][i],cat:'test',year:2002+i}));__C.byId.movie=new Map(__C.movie.map(m=>[m.id,m]));__app.go('search',{q:'spiderman'},{root:true})")
     page.wait_for_function('document.querySelectorAll("#sr-sugg .f").length===4')
-    page.locator('.kb .key').last.focus()
+    page.locator('.kb .key').nth(30).focus()
+    page.keyboard.press('ArrowDown')
+    assert page.evaluate('document.activeElement.dataset.key') in [' ','del','clear']
     page.keyboard.press('ArrowDown')
     assert page.evaluate('document.activeElement.id')=='sr-dictate'
     for i in range(4):
