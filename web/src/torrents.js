@@ -4,6 +4,7 @@ import * as N from './native.js';
 import { setting } from './store.js';
 
 export const PROVIDERS = { rd: 'Real-Debrid', ad: 'AllDebrid' };
+export const INTERNET_TORRENTS = 'https://torrentio.strem.fun';
 const CATALOGUE = 'https://v3-cinemeta.strem.io';
 const cache = new Map();
 const jobs = new Map(); // in-memory IDs: retry preparation without adding the magnet again
@@ -42,6 +43,7 @@ async function memo(key, load) {
   const hit = cache.get(key);
   if (hit && Date.now() - hit.at < 120000) return hit.data;
   const data = await load();
+  if (data.sourceErrors?.length) return data;
   if (cache.size >= 12) cache.delete(cache.keys().next().value);
   cache.set(key, { at: Date.now(), data });
   return data;
@@ -78,7 +80,9 @@ export async function validateSource(value) {
 }
 export function normaliseSources(streams) {
   const seen = new Set(), out = [];
-  for (const s of streams.slice(0, 150)) {
+  // Rank before limiting display rows so a long list of 4K releases does not
+  // exclude the user's preferred 1080p releases further down the response.
+  for (const s of streams.slice(0, 1000)) {
     if (!s || typeof s !== 'object') continue;
     const url = mediaUrl(s.url), hash = /^[a-f\d]{40}$/i.test(s.infoHash || '') ? s.infoHash.toLowerCase() : '';
     // External web pages and streams requiring request headers cannot be handed to every player.
@@ -91,18 +95,44 @@ export function normaliseSources(streams) {
     const quality = /2160|\b4k\b/i.test(text) ? 2160 : /1080/.test(text) ? 1080 : /720/.test(text) ? 720 : /480/.test(text) ? 480 : 0;
     const seedMatch = /(?:👤|seed(?:er)?s?\s*[:=]?)\s*([\d,]+)/i.exec(text);
     const seeds = Number.isFinite(+s.seeders) ? +s.seeders : seedMatch ? +seedMatch[1].replace(/,/g, '') : null;
-    out.push({ key, url, hash, fileIdx, text: text || 'Source', quality, seeds, size: +s.behaviorHints?.videoSize || 0 });
+    out.push({ key, url, hash, fileIdx, text: text || 'Source', quality, seeds, size: +s.behaviorHints?.videoSize || 0,
+      sourceLabel: String(s._lumenSource || '').slice(0, 100), sourceType: s._lumenScope || 'custom' });
   }
   const quality = +(setting('torrentQuality') || 1080);
   const distance = (s) => s.quality === quality ? 0 : !s.quality ? 10000 : s.quality < quality ? quality - s.quality : 3000 + s.quality;
-  return out.sort((a, b) => Number(!!b.url) - Number(!!a.url) || distance(a) - distance(b) || (b.seeds || 0) - (a.seeds || 0));
+  return out.sort((a, b) => Number(b.sourceType === 'internet') - Number(a.sourceType === 'internet') || Number(!!b.url) - Number(!!a.url) || distance(a) - distance(b) || (b.seeds || 0) - (a.seeds || 0)).slice(0, 150);
 }
-export async function findSources(type, id) {
-  const base = setting('torrentSource');
-  if (!base) return [];
-  return memo('streams:' + base + ':' + type + ':' + id + ':' + (setting('torrentQuality') || 1080), async () => {
-    const r = await json(`${sourceBase(base)}/stream/${type}/${encodeURIComponent(id)}.json`);
-    return normaliseSources(Array.isArray(r.streams) ? r.streams : []);
+export function searchProviders() {
+  const providers = [];
+  if (setting('internetTorrents') !== false) providers.push({ base: INTERNET_TORRENTS, name: 'Internet · Torrentio', scope: 'internet' });
+  const custom = setting('torrentSource');
+  if (custom) {
+    const base = sourceBase(custom);
+    if (!providers.some((p) => p.base === base)) providers.push({ base, name: setting('torrentSourceName') || 'Additional source', scope: 'custom' });
+  }
+  return providers;
+}
+export async function findSources(type, id, { refresh = false } = {}) {
+  const providers = searchProviders();
+  if (!providers.length) return [];
+  const key = 'streams:' + providers.map((p) => p.base).join('|') + ':' + type + ':' + id + ':' + (setting('torrentQuality') || 1080);
+  if (refresh) cache.delete(key);
+  return memo(key, async () => {
+    const results = await Promise.all(providers.map(async (p) => {
+      try {
+        const r = await json(`${p.base}/stream/${type}/${encodeURIComponent(id)}.json`);
+        if (!Array.isArray(r.streams)) throw new Error('Invalid stream response');
+        return { ...p, streams: r.streams.slice(0, 500).map((s) => ({ ...s, _lumenSource: p.name, _lumenScope: p.scope })) };
+      } catch { return { ...p, error: true, streams: [] }; }
+    }));
+    const errors = results.filter((p) => p.error).map((p) => p.name);
+    if (errors.length === providers.length) throw new Error('Internet torrent sources are unavailable. Please retry; this is separate from your Debrid connection.');
+    const sources = normaliseSources(results.reduce((all, p) => all.concat(p.streams), []));
+    sources.sourceErrors = errors;
+    const count = sources.filter((s) => s.sourceType === 'internet').length;
+    sources.sourceSummary = `${count} internet torrents${sources.length > count ? ` · ${sources.length - count} additional sources` : ''}. Debrid is used when you play a torrent.`;
+    if (errors.length) sources.sourceSummary += ' Unavailable: ' + errors.join(', ') + '.';
+    return sources;
   });
 }
 async function api(id, path, method = 'GET', fields, overrideKey) {

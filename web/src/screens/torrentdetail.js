@@ -1,4 +1,4 @@
-import { findSources, titleMeta, resolveSource, preferredProvider, PROVIDERS } from '../torrents.js';
+import { findSources, titleMeta, resolveSource, preferredProvider, PROVIDERS, searchProviders } from '../torrents.js';
 import { setting, S, sessionUnlocked, unlockSession } from '../store.js';
 import { esc, bytes, safeFile } from '../util.js';
 import { icon, poster, sheet, pinPad } from '../ui.js';
@@ -36,7 +36,7 @@ export class TorrentDetailScreen {
     view.querySelector('#td-list').onclick = (e) => {
       const b = e.target.closest('[data-source],[data-episode],[data-retry]');
       if (!b) return;
-      if (b.hasAttribute('data-retry')) return this.loadSources();
+      if (b.hasAttribute('data-retry')) return this.loadSources(true, true);
       if (b.dataset.episode != null) { this.episode = this.episodes[+b.dataset.episode]; this.index = 0; this.loadSources(true); }
       else { this.index = +b.dataset.source; this.markSelection(); this.launch(false); }
     };
@@ -95,23 +95,24 @@ export class TorrentDetailScreen {
     const more = this.view.querySelector('#td-more-episodes');
     if (more) more.onclick = () => { this.epPage = (page + 1) % pages; this.paintEpisodes(true); };
   }
-  async loadSources(move = false) {
+  async loadSources(move = false, refresh = false) {
     const token = ++this.token;
-    this.phase = 'sources'; this.actions(false); this.status('Finding sources…');
+    this.phase = 'sources'; this.sources = []; this.actions(false); this.status('Searching internet torrent indexes…');
     this.view.querySelector('#td-heading').textContent = this.episode ? `S${this.episode.season} E${this.episode.episode} · Sources` : 'Choose a source';
     this.list('<p class="st-intro">Loading sources…</p>');
-    if (!setting('torrentSource')) {
-      this.status(''); this.list('<p class="st-intro">Add a Stremio-compatible source provider in Debrid settings. Debrid accounts resolve links; they do not search for titles.</p>');
+    if (!searchProviders().length) {
+      this.status(''); this.list('<p class="st-intro">Internet torrent search is switched off. Enable it in Debrid settings, or add another source provider.</p>');
       if (move) focus(this.view.querySelector('#td-settings')); return;
     }
     try {
-      const sources = await findSources(this.item.type, this.episode?.id || this.item.id);
+      const sources = await findSources(this.item.type, this.episode?.id || this.item.id, { refresh });
       if (this.dead || token !== this.token) return;
       this.sources = sources;
       this.index = Math.min(this.index, Math.max(0, sources.length - 1));
-      this.list(sources.map((s, i) => `<button class="f td-source ${i === this.index ? 'selected' : ''}" data-source="${i}"><b>${s.quality ? s.quality + 'p' : 'Quality unknown'} <span class="tag">${s.url ? 'Direct link' : 'Debrid required'}</span></b><span>${esc(s.text)}</span><small>${[s.size ? bytes(s.size) : '', s.seeds != null ? s.seeds.toLocaleString() + ' seeds' : ''].filter(Boolean).join(' · ')}</small></button>`).join('') || '<p class="st-intro">No supported sources found. Try another provider or your IPTV library.</p>', move);
+      const rows = sources.map((s, i) => `<button class="f td-source ${i === this.index ? 'selected' : ''}" data-source="${i}"><b>${s.quality ? s.quality + 'p' : 'Quality unknown'} <span class="tag">${s.url ? 'Direct link' : 'Debrid playback'}</span></b><span>${esc(s.text)}</span><small>${[esc(s.sourceLabel), s.size ? bytes(s.size) : '', s.seeds != null ? s.seeds.toLocaleString() + ' seeds' : ''].filter(Boolean).join(' · ')}</small></button>`).join('');
+      this.list((rows || '<p class="st-intro">No supported internet torrents were found for this title. Try another source or your IPTV library.</p>') + '<button class="f btn" data-retry>Search sources again</button>', move);
       this.actions(!!sources.length);
-      this.status(sources.length ? 'Sorted by direct links, preferred quality, then seeds. Availability checked when selected.' : '');
+      this.status(sources.sourceSummary || 'Search complete.');
     } catch (e) {
       if (!this.dead && token === this.token) { this.status(e.message); this.list('<button class="f btn" data-retry>Retry sources</button>', move); }
     }

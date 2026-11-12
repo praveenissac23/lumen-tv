@@ -127,9 +127,9 @@ test('parental control requires PIN before online tab opens',async()=>{
  x.w.document.querySelector('.pin-key[data-k="1"]').click(); x.w.document.querySelector('.pin-key[data-k="2"]').click(); x.w.document.querySelector('.pin-key[data-k="3"]').click(); x.w.document.querySelector('.pin-key[data-k="4"]').click();
  await delay(150); await p; assert.equal(s.tab,'torrents'); s.destroy();
 });
-test('missing source provider keeps detail usable with a path to settings',async()=>{
- const x=setup(undefined,{settings:{lockAdult:false}}); const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Test'}},x.app);
- await delay(10); assert.match(x.view.querySelector('#td-list').textContent,/Add a Stremio-compatible/); assert.equal(x.view.querySelector('#td-play').disabled,true); d.destroy();
+test('explicitly disabled internet search keeps detail usable with a path to settings',async()=>{
+ const x=setup(undefined,{settings:{lockAdult:false,internetTorrents:false}}); const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Test'}},x.app);
+ await delay(10); assert.match(x.view.querySelector('#td-list').textContent,/Internet torrent search is switched off/); assert.equal(x.view.querySelector('#td-play').disabled,true); d.destroy();
 });
 test('Debrid settings render saved state without exposing API keys',()=>{
  const x=setup(); x.torrents.saveAccount('rd','PRIVATE_TOKEN');
@@ -177,4 +177,39 @@ test('fallback keeps TMDB images small and supports channel logos and banner art
  let img=x.view.querySelector('img'); x.w.__lumenImageError(img); assert.equal(img.src,'https://logos.test/logo.png');
  x.view.innerHTML=x.ui.artworkImage('https://images.test/banner.jpg?x=1&y=2',960,'bb-wide');
  img=x.view.querySelector('img'); x.w.__lumenImageError(img); assert.equal(img.className,'bb-wide'); assert.equal(img.src,'https://images.test/banner.jpg?x=1&y=2');
+});
+
+test('internet torrent indexes are searched without a Debrid account or custom add-on',async()=>{
+ const x=setup(async()=>({streams:[{name:'1080p',infoHash:'a'.repeat(40),title:'seeders: 99'}]}));
+ const sources=await x.torrents.findSources('movie','tt1254207');
+ assert.equal(sources.length,1); assert.equal(sources[0].sourceType,'internet'); assert.equal(sources[0].hash,'a'.repeat(40));
+ assert.match(x.calls[0].url,/^https:\/\/torrentio.strem.fun\/stream\/movie\/tt1254207.json$/);
+ assert.equal(x.calls.filter(c=>c.headers?.Authorization).length,0); assert.equal(x.torrents.preferredProvider(),'');
+});
+test('a Debrid-cloud add-on cannot replace or restrict the independent internet search',async()=>{
+ const x=setup(async(url)=>url.startsWith('https://torrentio.strem.fun')?{streams:[{name:'1080p',infoHash:'b'.repeat(40)}]}:{streams:[{url:'https://cloud.test/video.mp4',name:'1080p'}]}, {settings:{torrentSource:'https://cloud-addon.test',torrentSourceName:'Cloud addon'}});
+ x.torrents.saveAccount('rd','PRIVATE_TOKEN');
+ const sources=await x.torrents.findSources('movie','tt1');
+ assert.equal(sources.length,2); assert.equal(sources[0].sourceType,'internet'); assert.equal(sources[1].sourceType,'custom');
+ assert.equal(x.calls.filter(c=>c.url.includes('/stream/movie/')).length,2);
+ assert.ok(x.calls.every(c=>!c.url.includes('PRIVATE_TOKEN')&&!c.headers?.Authorization));
+});
+test('provider outages are explicit and do not hide working internet torrents',async()=>{
+ const x=setup(async(url)=>{if(url.startsWith('https://cloud-addon.test')) throw Error('offline');return {streams:[{infoHash:'c'.repeat(40)}]};},{settings:{torrentSource:'https://cloud-addon.test',torrentSourceName:'Cloud addon'}});
+ const sources=await x.torrents.findSources('series','tt1:1:2');
+ assert.equal(sources.length,1); assert.equal(sources.sourceErrors[0],'Cloud addon'); assert.match(sources.sourceSummary,/1 internet torrents/);
+});
+test('internet outage is visible even when a custom cloud provider still works',async()=>{
+ const x=setup(async(url)=>{if(url.startsWith('https://torrentio.strem.fun'))throw Error('offline');return {streams:[{url:'https://cloud/video.mp4'}]};},{settings:{torrentSource:'https://cloud-addon.test'}});
+ const sources=await x.torrents.findSources('movie','tt1'); assert.match(sources.sourceSummary,/Unavailable: Internet/); assert.equal(sources[0].sourceType,'custom');
+});
+test('internet search can be disabled explicitly without losing a custom provider',async()=>{
+ const x=setup(async()=>({streams:[]}),{settings:{internetTorrents:false,torrentSource:'https://custom.test'}});
+ await x.torrents.findSources('movie','tt1'); assert.equal(x.calls.length,1); assert.ok(x.calls[0].url.startsWith('https://custom.test/'));
+});
+test('ranking happens before limiting a large internet response to 150 TV rows',()=>{
+ const x=setup(); const streams=[];
+ for(let i=0;i<200;i++)streams.push({infoHash:i.toString(16).padStart(40,'0'),name:'2160p',_lumenScope:'internet'});
+ streams.push({infoHash:'f'.repeat(40),name:'1080p',_lumenScope:'internet'});
+ const sources=x.torrents.normaliseSources(streams); assert.equal(sources.length,150); assert.equal(sources[0].quality,1080);
 });

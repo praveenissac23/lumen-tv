@@ -29,6 +29,7 @@ try:
     page.add_init_script('localStorage.setItem("c:state",'+json.dumps(json.dumps(seed))+');')
     page.route('https://v3-cinemeta.strem.io/**', lambda route: route.fulfill(json={'metas':[meta]} if '/catalog/movie/' in route.request.url else {'metas':[]}))
     page.route('https://source.test/**', lambda route: route.fulfill(json={'streams':[{'name':'1080p','title':'English · 2 GB','url':'https://cdn.test/video.mp4'},{'name':'720p','infoHash':'a'*40,'title':'seeders: 123'}]}))
+    page.route('https://torrentio.strem.fun/**', lambda route: route.fulfill(json={'streams':[{'name':'1080p','title':'Internet release · seeders: 999','infoHash':'b'*40,'fileIdx':0}]}))
     page.goto(f'http://127.0.0.1:{server.server_port}/index.html')
     page.wait_for_function('window.__bootMs !== undefined')
     def focused():
@@ -50,6 +51,8 @@ try:
     page.locator('[data-torrent="0"]').click()
     page.wait_for_selector('[data-source="0"]')
     assert page.locator('#td-play').is_enabled()
+    assert 'Internet · Torrentio' in page.locator('[data-source="0"]').inner_text()
+    assert 'internet torrents' in page.locator('#td-status').inner_text()
     for key in ['ArrowDown','ArrowDown','ArrowUp','ArrowLeft','ArrowRight']:
         page.keyboard.press(key)
         focused()

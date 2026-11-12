@@ -199,13 +199,14 @@ export class SettingsScreen {
 
   debrid() {
     const a = accounts();
-    return `<h1>Debrid and torrents</h1><p class="st-intro">Search IPTV and online titles together. Connect your own accounts and a Stremio-compatible source add-on. Lumen TV remains your default search tab.</p>
+    return `<h1>Debrid and torrents</h1><p class="st-intro">Torrents searches internet torrent indexes. Debrid prepares and plays the torrent you choose; search is not limited to your Debrid cloud. Lumen TV remains your default tab.</p>
       ${Object.entries(PROVIDERS).map(([id, name]) => this.row(name, a[id]?.key ? '<span class="pill on">Key saved</span>' : '<span class="pill">Connect</span>', 'debrid-key', id, a[id]?.key ? (preferredProvider() === id ? 'Preferred provider · Verify or disconnect' : 'Verify or disconnect') : 'Use an API key from your provider account')).join('')}
       ${this.row('Preferred Debrid provider', esc(PROVIDERS[preferredProvider()] || 'Connect an account first'), 'debrid-preferred')}
       <h2>Source search</h2>
-      ${this.row('Source add-on', esc(setting('torrentSourceName') || 'Add provider'), 'torrent-source', '', 'Paste an HTTPS Stremio manifest URL. Your Debrid API keys are not sent to this provider.')}
-      ${this.row('Preferred quality', (setting('torrentQuality') || 1080) + 'p', 'torrent-quality', '', 'Prefer this quality, then seed count. Direct links are listed first.')}
-      <div class="st-note"><p>API keys are stored separately from IPTV settings in this app’s private storage. Online searches use Cinemeta for title information. Source availability is checked when selected; some torrents need preparation in your Debrid account.</p><p>When parental control is enabled, opening the Torrents tab requires your PIN because online titles are outside your IPTV categories.</p></div>`;
+      ${this.row('Internet torrent search', this.toggle(setting('internetTorrents') !== false), 'internet-torrents', '', 'Torrentio searches multiple public torrent indexes. No Debrid login is used for this search.')}
+      ${this.row('Additional source add-on', esc(setting('torrentSourceName') || 'Optional'), 'torrent-source', '', 'Search an additional Stremio-compatible provider alongside internet torrents.')}
+      ${this.row('Preferred quality', (setting('torrentQuality') || 1080) + 'p', 'torrent-quality', '', 'Internet results first, then preferred quality and seed count.')}
+      <div class="st-note"><p>Your Debrid API keys are not sent to Torrentio. Cached-only filters from an additional add-on do not restrict internet search. Uncached torrents may need preparation in your Debrid account before they play.</p><p>When parental control is enabled, opening the Torrents tab requires your PIN because online titles are outside your IPTV categories.</p></div>`;
   }
 
   subs() {
@@ -271,6 +272,7 @@ export class SettingsScreen {
   }
 
   async act(a, arg, btn) {
+    if (a === 'internet-torrents') { setting('internetTorrents', setting('internetTorrents') === false); this.repaint(btn); return; }
     if (a === 'debrid-key') {
       const existing = accounts()[arg]?.key;
       let action = 'replace';
@@ -305,7 +307,7 @@ export class SettingsScreen {
       if (setting('torrentSource')) action = await sheet({ title: 'Source provider', options: [{ label: 'Replace provider', value: 'edit' }, { label: 'Remove provider', value: 'remove' }] });
       if (action === 'remove') { setting('torrentSource', ''); setting('torrentSourceName', ''); this.repaint(btn); return; }
       if (!action) { this.repaint(btn); return; }
-      const v = await form({ title: 'Source provider', note: 'Paste the manifest URL of a Stremio-compatible stream add-on you trust. Lumen does not bundle a torrent index or engine.', fields: [{ name: 'url', label: 'Manifest URL', value: setting('torrentSource') ? setting('torrentSource') + '/manifest.json' : '', placeholder: 'https://your-provider/manifest.json', required: true }], submit: 'Connect' });
+      const v = await form({ title: 'Additional source provider', note: 'Optional: this provider is searched alongside internet torrents. Removing it does not switch off internet search.', fields: [{ name: 'url', label: 'Manifest URL', value: setting('torrentSource') ? setting('torrentSource') + '/manifest.json' : '', placeholder: 'https://your-provider/manifest.json', required: true }], submit: 'Connect' });
       if (v) {
         toast('Checking the source provider…');
         try { const p = await validateSource(v.url); setting('torrentSource', p.base); setting('torrentSourceName', p.name); toast('Source provider added'); }
