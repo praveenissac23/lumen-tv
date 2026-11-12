@@ -19,7 +19,7 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Quiet, directory=str(ROOT / 'build/web')))
 threading.Thread(target=server.serve_forever, daemon=True).start()
 seed = {'active':'demo','favs':{'live':['d1'],'movie':['f3'],'series':[]},'settings':{'autoplayLast':False,'autoPreview':False,'preview':False,'lockAdult':True,'lite':True,'motion':False,'playerMovie':'org.videolan.vlc','torrentSource':'https://source.test','torrentSourceName':'Test provider'}}
-meta = {'id':'tt100','name':'Test Harbour','type':'movie','releaseInfo':'2025'}
+meta = {'id':'tt100','name':'Spiderman','type':'movie','releaseInfo':'2002'}
 errors = []
 try:
  with sync_playwright() as p:
@@ -27,10 +27,20 @@ try:
     page = browser.new_page(viewport={'width':1920,'height':1080})
     page.on('pageerror', lambda e: errors.append(str(e)))
     page.add_init_script('localStorage.setItem("c:state",'+json.dumps(json.dumps(seed))+');')
-    page.add_init_script('localStorage.setItem("c:debrid-accounts",JSON.stringify({rd:{key:"TEST_FIXTURE_ONLY"}}));')
+    page.add_init_script('localStorage.setItem("c:debrid-accounts",JSON.stringify({rd:{key:"TEST_FIXTURE_ONLY"},ad:{key:"TEST_FIXTURE_ONLY"}}));')
     page.route('https://v3-cinemeta.strem.io/**', lambda route: route.fulfill(json={'metas':[meta]} if '/catalog/movie/' in route.request.url else {'metas':[]}))
     page.route('https://source.test/**', lambda route: route.fulfill(json={'streams':[{'name':'1080p','title':'English · 2 GB','url':'https://cdn.test/video.mp4'},{'name':'720p','infoHash':'a'*40,'title':'seeders: 123'}]}))
     page.route('https://torrentio.strem.fun/**', lambda route: route.fulfill(json={'streams':[*({'name':'1080p','title':'Internet release · seeders: 999','infoHash':format(i+1,'040x'),'fileIdx':0} for i in range(40))]}))
+    mutations=[]
+    def account_fixture(route):
+        url=route.request.url
+        if '/upload' in url or '/addMagnet' in url:
+            mutations.append(url); route.fulfill(status=500,json={'error':'Unexpected upload'}); return
+        if 'real-debrid.com' in url:
+            route.fulfill(json=[{'id':2,'hash':format(2,'040x'),'status':'downloaded'}]); return
+        route.fulfill(json={'status':'success','data':{'magnets':[{'id':1,'hash':format(1,'040x'),'statusCode':4}]}})
+    page.route('https://api.real-debrid.com/**',account_fixture)
+    page.route('https://api.alldebrid.com/**',account_fixture)
     page.goto(f'http://127.0.0.1:{server.server_port}/index.html')
     page.wait_for_function('window.__bootMs !== undefined')
     def focused():
@@ -45,19 +55,49 @@ try:
         page.keyboard.press('ArrowDown')
         focused()
     page.wait_for_function('document.activeElement.dataset.sec === "about" && document.activeElement.getBoundingClientRect().bottom <= innerHeight')
-    page.evaluate('__app.go("search",{q:"harbour"},{root:true})')
+    # Reproduce the reported Spiderman suggestion trap using a deterministic IPTV catalogue.
+    page.evaluate("__C.movie=Array.from({length:5},(_,i)=>({id:'sp'+i,name:['Spiderman (2002)','Spiderman 2','Spiderman 3','Spiderman Homecoming','Spiderman Far From Home'][i],n:['spiderman 2002','spiderman 2','spiderman 3','spiderman homecoming','spiderman far from home'][i],cat:'test',year:2002+i}));__C.byId.movie=new Map(__C.movie.map(m=>[m.id,m]));__app.go('search',{q:'spiderman'},{root:true})")
+    page.wait_for_function('document.querySelectorAll("#sr-sugg .f").length===4')
+    page.locator('.kb .key').last.focus()
+    page.keyboard.press('ArrowDown')
+    assert page.evaluate('document.activeElement.id')=='sr-dictate'
+    for i in range(4):
+        page.keyboard.press('ArrowDown')
+        assert page.evaluate('Array.from(document.querySelectorAll("#sr-sugg .f")).indexOf(document.activeElement)')==i
+        page.wait_for_timeout(180)
+        assert page.evaluate('(()=>{const r=document.activeElement.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight})()')
+    (ROOT/'build/navigation-shots').mkdir(parents=True,exist_ok=True)
+    page.screenshot(path=str(ROOT/'build/navigation-shots/search-suggestions.png'))
+    chosen=page.evaluate('document.activeElement.dataset.q')
+    page.keyboard.press('Enter')
+    assert page.locator('#sr-input').input_value()==chosen
+    focused()
+    page.evaluate('__app.go("search",{q:"spiderman"},{root:true})')
     page.wait_for_selector('[data-torrent="0"]',state='attached')
     assert page.locator('[data-tab=lumen]').get_attribute('aria-pressed') == 'true'
     page.locator('[data-tab=torrents]').click()
     page.locator('[data-torrent="0"]').click()
     page.wait_for_selector('[data-source="0"]')
     assert page.locator('#td-play').is_enabled()
-    assert 'Internet · Torrentio' in page.locator('[data-source="0"]').inner_text()
+    assert 'Direct video link' in page.locator('[data-source="0"]').inner_text()
     assert 'internet torrents' in page.locator('#td-status').inner_text()
-    assert 'Real-Debrid' in page.locator('[data-source="0"] .td-route-debrid').inner_text()
-    assert 'Play in VLC' in page.locator('[data-source="0"] .td-row-play').inner_text()
-    (ROOT/'build/navigation-shots').mkdir(parents=True,exist_ok=True)
+    page.wait_for_function('document.querySelectorAll(".td-debrid").length===2')
+    ready=page.locator('.td-debrid').filter(has_text='Ready in AllDebrid')
+    assert ready.count()==1
+    assert page.locator('[data-source="4"]').get_attribute('class').find('td-debrid')<0
+    page.locator('[data-source="2"]').focus()
+    # Let the application reveal the selected row through its normal D-pad path.
+    page.keyboard.press('ArrowDown'); page.keyboard.press('ArrowUp')
+    page.wait_for_timeout(200)
     page.screenshot(path=str(ROOT/'build/navigation-shots/torrent-source-play.png'))
+    page.keyboard.down('Enter'); page.wait_for_timeout(800); page.keyboard.up('Enter')
+    page.wait_for_selector('.sheet-wrap')
+    assert 'Upload to AllDebrid' in page.locator('.sheet').inner_text()
+    assert 'Open with another player' in page.locator('.sheet').inner_text()
+    assert not mutations,mutations
+    page.screenshot(path=str(ROOT/'build/navigation-shots/torrent-long-press.png'))
+    page.keyboard.press('Escape')
+    page.wait_for_selector('.sheet-wrap',state='detached')
     # OK on the remote routes the focused row straight to playback, once.
     page.evaluate("window.__plays=[];__app.current().ctl.launch=function(download){window.__plays.push({index:this.index,download})};true")
     page.locator('[data-source="0"]').focus()
@@ -78,7 +118,7 @@ try:
     page.keyboard.press('Escape')
     page.wait_for_selector('[data-torrent="0"]')
     assert page.locator('[data-tab=torrents]').get_attribute('aria-pressed') == 'true'
-    assert page.locator('#sr-input').input_value() == 'harbour'
+    assert page.locator('#sr-input').input_value() == 'spiderman'
     page.wait_for_function('document.activeElement.hasAttribute("data-torrent")')
     # Holding Right stays on the row and never escapes into another group.
     page.keyboard.down('ArrowRight')
@@ -87,6 +127,7 @@ try:
     page.evaluate('__app.go("settings",{restore:{sec:"debrid"}},{root:true})')
     assert page.locator('[data-act=debrid-key]').count() == 2
     assert not errors, errors
+    assert not mutations,mutations
     out = ROOT / 'build/navigation-shots'
     out.mkdir(parents=True,exist_ok=True)
     page.screenshot(path=str(out/'debrid-settings.png'))

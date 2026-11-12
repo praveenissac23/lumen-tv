@@ -199,14 +199,16 @@ export class SettingsScreen {
 
   debrid() {
     const a = accounts();
-    return `<h1>Debrid and torrents</h1><p class="st-intro">Torrents searches internet torrent indexes. Debrid prepares and plays the torrent you choose; search is not limited to your Debrid cloud. Lumen TV remains your default tab.</p>
+    return `<h1>Debrid and torrents</h1><p class="st-intro">Torrents searches internet torrent indexes. Debrid prepares and plays the torrent you choose; search is not limited to your Debrid cloud. Uploading is an explicit long-press action. Lumen TV remains your default tab.</p>
       ${Object.entries(PROVIDERS).map(([id, name]) => this.row(name, a[id]?.key ? '<span class="pill on">Key saved</span>' : '<span class="pill">Connect</span>', 'debrid-key', id, a[id]?.key ? (preferredProvider() === id ? 'Preferred provider · Verify or disconnect' : 'Verify or disconnect') : 'Use an API key from your provider account')).join('')}
       ${this.row('Preferred Debrid provider', esc(PROVIDERS[preferredProvider()] || 'Connect an account first'), 'debrid-preferred')}
+      <h2>External torrent playback</h2>
+      ${this.row('TorrServer address', esc(setting('torrentServer') || 'Optional · not configured'), 'torrent-server', '', 'Streams raw torrents to VLC without uploading to Debrid. Requires TorrServer running on your TV or local network.')}
       <h2>Source search</h2>
       ${this.row('Internet torrent search', this.toggle(setting('internetTorrents') !== false), 'internet-torrents', '', 'Torrentio searches multiple public torrent indexes. No Debrid login is used for this search.')}
       ${this.row('Additional source add-on', esc(setting('torrentSourceName') || 'Optional'), 'torrent-source', '', 'Search an additional Stremio-compatible provider alongside internet torrents.')}
-      ${this.row('Preferred quality', (setting('torrentQuality') || 1080) + 'p', 'torrent-quality', '', 'Internet results first, then preferred quality and seed count.')}
-      <div class="st-note"><p>Your Debrid API keys are not sent to Torrentio. Cached-only filters from an additional add-on do not restrict internet search. Uncached torrents may need preparation in your Debrid account before they play.</p><p>Torrent browsing opens without a PIN.</p></div>`;
+      ${this.row('Preferred quality', (setting('torrentQuality') || 1080) + 'p', 'torrent-quality', '', 'Direct video links first, then preferred quality and seed count.')}
+      <div class="st-note"><p>Your Debrid API keys are not sent to Torrentio. Cached-only filters from an additional add-on do not restrict internet search. Green Ready badges require a matching ready torrent in your account. Availability cannot always be checked across the entire provider cache. External magnets use TorrServer or a torrent app; they are never uploaded automatically.</p><p>Torrent browsing opens without a PIN.</p></div>`;
   }
 
   subs() {
@@ -272,6 +274,11 @@ export class SettingsScreen {
   }
 
   async act(a, arg, btn) {
+    if (a === 'torrent-server') {
+      const v=await form({title:'External torrent streaming',note:'Run TorrServer on this TV or your network, then enter its address, for example http://192.168.1.10:8090. Lumen uses it to give VLC a video URL without a Debrid upload. Leave blank to use installed torrent apps.',fields:[{name:'url',label:'TorrServer address',value:setting('torrentServer')||''}],submit:'Save'});
+      if(v) { try { const {torrentServerBase}=await import('../torrents.js'); setting('torrentServer',v.url.trim()?torrentServerBase(v.url):''); toast('Torrent playback setting saved'); } catch(e) { toast(e.message,'err'); } }
+      if(this.view.isConnected) this.repaint(btn); return;
+    }
     if (a === 'internet-torrents') { setting('internetTorrents', setting('internetTorrents') === false); this.repaint(btn); return; }
     if (a === 'debrid-key') {
       const existing = accounts()[arg]?.key;

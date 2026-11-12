@@ -48,3 +48,14 @@ The interface no longer requests the synthetic thumbnail hostname. Android downl
 Debrid review fixes explicit episode mismatches, missing AllDebrid file links, reconnect messages for invalid keys, and stale Back-navigation playback. Internet torrent discovery remains separate from account credentials. Both providers' API flows, cloud preparation, key errors and cancellation are covered by deterministic tests; subscribed live playback on the user's TV cannot be exercised here.
 
 Release gates now include the shared artwork UI fixture in a real Android WebView. The test downloads a PNG from an isolated HTTP fixture, follows a redirect, decodes Android's returned JPEG data in WebView, repairs a corrupt image cache, and retains a title when artwork is unavailable. Test dependencies and fixtures are excluded from the release APK.
+
+
+### Search navigation and explicit torrent actions
+
+The keyboard and suggestions share a scrollable track. Down from the keyboard's bottom rows reaches Speak or type, then every suggestion; Up returns through the same region. Selecting a suggestion preserves a valid focus target after repaint.
+
+Normal source activation uses a video URL, an existing ready cloud job, a configured TorrServer, or an installed magnet handler. It never calls the magnet upload endpoints. AllDebrid and Real-Debrid uploads are explicit long-press actions. The menu also offers VLC, Android's other-player chooser, installed download managers, and an external torrent app. Uncached Debrid add-on download resolver links are converted back to magnets instead of triggering cloud preparation through their URLs.
+
+Green Ready badges are based on a matching hash and ready status from read-only account listings. Connecting an account or an add-on's RD+/AD+ label alone does not verify readiness. The supported APIs do not provide a universal passive global-cache check; unknown availability stays unmarked. Availability checks are bounded during activation so a stalled account API does not indefinitely block external playback.
+
+VLC requires a video stream URL and does not consume raw magnets. The optional TorrServer client retrieves torrent file metadata, selects the requested episode/file, and hands VLC an HTTP stream. The server must already run on the user's TV or network; no torrent engine or new runtime library is bundled in Lumen. Without it, magnets are handed to an installed torrent-capable app using a proper magnet intent. Physical device playback and an external server are not available in this environment; service fixtures cover these routes and production protocol is taken from the server's official API.

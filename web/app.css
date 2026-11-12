@@ -818,3 +818,11 @@ body.lite .row-track, body.lite .home-track, body.lite .sr-track, body.lite .st-
 .td-source.td-debrid { border-left:5px solid #61d5a4; }
 .td-source > .td-row-play { display:flex; align-items:center; gap:8px; color:var(--text); font-size:20px; font-weight:600; }
 .td-row-play .ic { width:19px; height:19px; }
+
+/* The keyboard and suggestions form one scrollable focus region. */
+.sr-kb { min-height:0; overflow:hidden; }
+.sr-kb-scroll { flex:1; min-height:0; overflow:hidden; position:relative; padding:8px; margin:-8px; }
+.sr-kb-track { position:relative; display:flex; flex-direction:column; gap:18px; padding-bottom:36px; transition:transform .16s var(--ease); }
+.sr-box, .sr-kb-track > .kb, .sr-kb-track > .dictate, .sr-sugg { flex:none; }
+.sr-sugg .sugg { flex:none; min-height:56px; }
+.td-route-external { background:var(--raised); color:var(--text-2); }

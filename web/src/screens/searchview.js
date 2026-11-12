@@ -20,14 +20,14 @@ export class SearchScreen {
     this.tab = params.restore?.tab || 'lumen'; this.dead = false; this.torrentToken = 0;
     this.restoreTorrent = params.restore?.lastTorrent || '';
     view.innerHTML = `<div class="sr">
-      <aside class="sr-kb" data-zone="srkb">
+      <aside class="sr-kb" data-zone="srkb"><div class="sr-kb-scroll" data-scroll="y" data-pad="14"><div class="sr-kb-track">
         <div class="sr-box">${icon('search')}<input class="sr-input" id="sr-input" value="${esc(this.q)}" placeholder="Search" autocomplete="off" spellcheck="false" readonly inputmode="none" tabindex="-1">
           <button class="f mic-btn sm" id="sr-mic" aria-label="Voice search">${icon('mic')}</button></div>
         <div class="kb" data-group="kb">${KEYS.map((k) => `<button class="f key" data-key="${k}">${k}</button>`).join('')}
           <button class="f key wide" data-key=" ">Space</button><button class="f key" data-key="del" aria-label="Delete">${icon('back')}</button><button class="f key" data-key="clear">Clear</button></div>
         <button class="f dictate" id="sr-dictate">${icon('mic')}<span>Speak or type</span><small>${window.__desktop ? 'Type on your keyboard, or press the dictation key (or Fn twice) and speak.' : 'Opens the TV keyboard. Hold the Alexa (mic) button and speak, then press Search.'}</small></button>
         <div class="sr-sugg" id="sr-sugg" data-group="sugg"></div>
-      </aside>
+      </div></div></aside>
       <section class="sr-results" data-zone="srres">
         <div class="sr-tabs" data-group="srtabs"><button class="f sr-tab" data-tab="lumen">Lumen TV</button><button class="f sr-tab" data-tab="torrents">Torrents <small id="sr-torrent-count"></small></button></div>
         <div class="sr-scroll sr-lumen-pane" data-scroll="y" data-pad="0"><div class="sr-track" id="sr-track"></div></div>
@@ -77,6 +77,7 @@ export class SearchScreen {
   paint() {
     if (this.dead) return;
     this.searchTorrents();
+    const suggestionIndex = [...this.view.querySelectorAll('#sr-sugg .f')].indexOf(document.activeElement);
     const q = this.q.trim();
     const track = this.view.querySelector('#sr-track');
     track._off = 0; track.style.transform = '';
@@ -96,6 +97,7 @@ export class SearchScreen {
     this.res = r;
     const words = suggestFrom(r, 4).filter((s) => s.toLowerCase() !== q.toLowerCase());
     sugg.innerHTML = words.map((w) => `<button class="f sugg" data-q="${esc(w)}">${icon('search')}<span>${esc(w)}</span></button>`).join('');
+    if (suggestionIndex >= 0) focus(sugg.querySelectorAll('.f')[Math.min(suggestionIndex, words.length - 1)] || this.view.querySelector('#sr-dictate'));
     const t = now();
     const best = r.best;
     const row = (title, items, render, key) => items.length ? `<section class="sr-sec"><h2>${title}<small>${items.length}</small></h2>
@@ -245,8 +247,22 @@ export class SearchScreen {
   onKey(k) {
     const a = document.activeElement;
     if (a === this.input) {
-      if (k === 'back' || k === 'submit' || k === 'down') { this.input.blur(); focus(this.view.querySelector(k === 'submit' && this.res ? '.sr-results .f' : '#sr-dictate') || this.view.querySelector('.key')); return true; }
+      if (k === 'back' || k === 'submit' || k === 'down') { this.input.blur(); focus(this.view.querySelector(k === 'submit' && this.res ? '.sr-results .f' : '#sr-sugg .f') || this.view.querySelector('#sr-dictate') || this.view.querySelector('.key')); return true; }
       if (k === 'up' || k === 'left' || k === 'right') return true;
+    }
+    const suggestions = [...this.view.querySelectorAll('#sr-sugg .f')];
+    const suggestion = a?.closest('#sr-sugg .f');
+    if (suggestion && ['up', 'down'].includes(k)) {
+      const i = suggestions.indexOf(suggestion), next = i + (k === 'down' ? 1 : -1);
+      focus(suggestions[next] || (k === 'up' ? this.view.querySelector('#sr-dictate') : suggestion)); return true;
+    }
+    if (a === this.view.querySelector('#sr-dictate')) {
+      if (k === 'down' && suggestions.length) { focus(suggestions[0]); return true; }
+      if (k === 'up') { focus(this.view.querySelector('.kb .key:last-child')); return true; }
+    }
+    if (a?.closest('.kb') && k === 'down') {
+      const keys = [...this.view.querySelectorAll('.kb .key')], i = keys.indexOf(a);
+      if (i >= 30) { focus(this.view.querySelector('#sr-dictate')); return true; }
     }
     if (k === 'hold' && a && a.closest('.res')) {
       const t = a.closest('.res'), kind = t.dataset.kind;

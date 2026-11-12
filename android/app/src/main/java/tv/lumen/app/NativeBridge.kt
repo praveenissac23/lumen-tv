@@ -308,6 +308,7 @@ class NativeBridge(private val act: MainActivity) {
         val o = JSONObject(optsJson)
         val title = o.optString("title"); val file = o.optString("file")
         val download = o.optString("mode") == "download"
+        val magnet = o.optString("mode") == "magnet"
         val pos = o.optLong("position", 0)
         val uri = Uri.parse(url)
         val pm = act.packageManager
@@ -329,17 +330,18 @@ class NativeBridge(private val act: MainActivity) {
             }
         }
         // Download managers register for plain links; players for video types. Try both, then share as text.
-        val candidates = if (download) listOf(base(null), base("video/*"), base("application/octet-stream"))
+        val candidates = if (magnet) listOf(base(null), base("application/x-bittorrent")) else if (download) listOf(base(null), base("video/*"), base("application/octet-stream"))
                          else listOf(base("video/*"), base(null))
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"; putExtra(Intent.EXTRA_TEXT, url); putExtra(Intent.EXTRA_SUBJECT, file.ifEmpty { title })
             if (pkg.isNotEmpty()) setPackage(pkg); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
         }
-        val intent = (candidates + send).firstOrNull { it.resolveActivity(pm) != null } ?: return false
+        val intent = (if (magnet) candidates else candidates + send).firstOrNull { it.resolveActivity(pm) != null } ?: return false
         return try {
             act.runOnUiThread {
                 try {
-                    if (pkg.isEmpty()) act.startActivity(Intent.createChooser(intent, if (download) "Download with" else "Play with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                    if (magnet) act.startActivity(intent)
+                    else if (pkg.isEmpty()) act.startActivity(Intent.createChooser(intent, if (download) "Download with" else "Play with").addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
                     else if (!download && intent.action == Intent.ACTION_VIEW) {
                         // Players report where you stopped when they close (VLC: extra_position, MX: position),
                         // so Continue watching works with them too. That needs a result, so no new task.

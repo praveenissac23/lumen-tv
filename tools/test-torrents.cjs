@@ -233,7 +233,7 @@ test('a Debrid-cloud add-on cannot replace or restrict the independent internet 
  const x=setup(async(url)=>url.startsWith('https://torrentio.strem.fun')?{streams:[{name:'1080p',infoHash:'b'.repeat(40)}]}:{streams:[{url:'https://cloud.test/video.mp4',name:'1080p'}]}, {settings:{torrentSource:'https://cloud-addon.test',torrentSourceName:'Cloud addon'}});
  x.torrents.saveAccount('rd','PRIVATE_TOKEN');
  const sources=await x.torrents.findSources('movie','tt1');
- assert.equal(sources.length,2); assert.equal(sources[0].sourceType,'internet'); assert.equal(sources[1].sourceType,'custom');
+ assert.equal(sources.length,2); assert.equal(sources[0].sourceType,'custom'); assert.equal(sources[1].sourceType,'internet');
  assert.equal(x.calls.filter(c=>c.url.includes('/stream/movie/')).length,2);
  assert.ok(x.calls.every(c=>!c.url.includes('PRIVATE_TOKEN')&&!c.headers?.Authorization));
 });
@@ -267,11 +267,12 @@ for(const [code,message] of [[10,/account verification/],[11,/account verificati
 for(const provider of ['rd','ad']) test(provider+' source OK resolves through Debrid and opens VLC once without pressing Play',async()=>{
  const x=setup(async(url)=>{
   if(url.includes('/stream/'))return {streams:[{infoHash:'b'.repeat(40),title:'1080p seeders: 30'}]};
-  if(url.endsWith('/addMagnet'))return {id:'8'};
+  if(url.includes('/torrents?'))return [{id:8,hash:'b'.repeat(40),status:'downloaded'}];
+  if(url.endsWith('/addMagnet'))throw Error('Unexpected upload');
   if(url.includes('/torrents/info/'))return {status:'downloaded',files:[{id:1,path:'Film.mkv',selected:1}],links:['https://rd.test/link']};
   if(url.endsWith('/unrestrict/link'))return {download:'https://cdn.test/rd.mkv'};
   if(url.endsWith('/magnet/upload'))return {status:'success',data:{magnets:[{id:8}]}};
-  if(url.endsWith('/magnet/status'))return {status:'success',data:{magnets:{id:8,statusCode:4}}};
+  if(url.endsWith('/magnet/status'))return {status:'success',data:{magnets:{id:8,statusCode:4,hash:'b'.repeat(40)}}};
   if(url.endsWith('/magnet/files'))return {status:'success',data:{magnets:[{id:8,files:[{n:'Film.mkv',l:'https://ad.test/link'}]}]}};
   if(url.endsWith('/link/unlock'))return {status:'success',data:{link:'https://cdn.test/ad.mkv'}};
   throw Error('Unexpected endpoint');
@@ -294,13 +295,73 @@ test('Debrid badges update when account changes and known direct links show prov
  const x=setup(async()=>({streams:[{infoHash:'c'.repeat(40)},{url:'https://download.real-debrid.com/video.mkv'}]}));x.torrents.saveAccount('rd','TEST');x.torrents.saveAccount('ad','TEST');
  const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(20);
  d.provider='ad';d.refreshRoutes();const routes=[...x.view.querySelectorAll('[data-route]')].map(n=>n.textContent);
- assert.ok(routes.includes('AllDebrid'));assert.ok(routes.includes('Real-Debrid link'));
+ assert.ok(routes.includes('External torrent')); assert.equal(x.view.querySelectorAll('.td-debrid').length,0);assert.ok(routes.includes('Real-Debrid link'));
  assert.equal(d.sourceProvider({url:'https://real-debrid.com.evil.test/video',text:''}),'');d.destroy();
 });
 
 test('direct add-on streams marked Torrentio RD+ or AD+ keep clear Debrid badges',async()=>{
  const x=setup(async()=>({streams:[{name:'Torrentio RD+ 1080p',url:'https://addon.test/rd'},{name:'Torrentio AD+ 1080p',url:'https://addon.test/ad'}]}));
  const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(20);
- const badges=[...x.view.querySelectorAll('.td-route-debrid [data-route]')].map(n=>n.textContent);
- assert.ok(badges.includes('Real-Debrid link'));assert.ok(badges.includes('AllDebrid link'));d.destroy();
+ const badges=[...x.view.querySelectorAll('[data-route]')].map(n=>n.textContent);
+ assert.ok(badges.includes('Real-Debrid link'));assert.ok(badges.includes('AllDebrid link'));assert.equal(x.view.querySelectorAll('.td-debrid').length,0);d.destroy();
+});
+
+test('normal click on an uncached magnet never uploads and opens only an external torrent handler',async()=>{
+ const x=setup(async url=>url.includes('/stream/')?{streams:[{infoHash:'a'.repeat(40)}]}:{status:'success',data:{magnets:[]}});
+ x.torrents.saveAccount('ad','TEST');const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(20);await d.launch(false);
+ assert.ok(x.calls.every(c=>!c.url.includes('/upload')&&!c.url.includes('/addMagnet')));
+ const handoff=x.calls.find(c=>c.handoff);assert.equal(handoff.options.mode,'magnet');assert.match(handoff.url,/^magnet:/);assert.equal(handoff.pkg,'');
+ assert.equal(x.view.querySelectorAll('.td-debrid').length,0);d.destroy();
+});
+test('verified AllDebrid availability highlights only the matching ready hash, never a downloading one',async()=>{
+ const x=setup(async url=>url.includes('/stream/')?{streams:[{infoHash:'a'.repeat(40)},{infoHash:'b'.repeat(40)}]}:{status:'success',data:{magnets:[{id:1,hash:'a'.repeat(40),statusCode:4},{id:2,hash:'b'.repeat(40),statusCode:1}]}});
+ x.torrents.saveAccount('ad','TEST');const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(30);
+ assert.equal(x.view.querySelectorAll('.td-debrid').length,1);assert.match(x.view.querySelector('.td-debrid').textContent,/Ready in AllDebrid/);
+ assert.ok(x.calls.every(c=>!c.url.includes('/upload')));d.destroy();
+});
+test('availability errors stay unknown and do not stop external playback or turn badges green',async()=>{
+ const x=setup(async()=>{throw Error('offline')});x.torrents.saveAccount('ad','TEST');
+ const r=await x.torrents.readySources([{hash:'c'.repeat(40)}]);assert.equal(r.found.size,0);assert.equal(r.errors[0],'AllDebrid');
+ const playback=await x.torrents.resolvePlayable({hash:'c'.repeat(40)},'ad',null,()=>{});assert.equal(playback.magnet,true);
+ assert.ok(x.calls.every(c=>!c.url.includes('/upload')));
+});
+test('TorrServer streams the correct episode to VLC without any Debrid upload',async()=>{
+ const x=setup(async url=>url.includes('/stream?')?{file_stats:[{id:1,path:'Show.S01E01.mkv',length:10},{id:2,path:'Show.S01E02.mkv',length:20}]}:{streams:[{infoHash:'d'.repeat(40),fileIdx:0}]},{settings:{torrentServer:'http://192.168.1.5:8090',playerSeries:'org.videolan.vlc'}});
+ const result=await x.torrents.resolvePlayable({hash:'d'.repeat(40),fileIdx:0},'',{id:'tt1:1:2',season:1,episode:2},()=>assert.fail());
+ assert.match(result.url,/^http:\/\/192.168.1.5:8090\/stream\?/);assert.equal(new URL(result.url).searchParams.get('index'),'2');assert.ok(new URL(result.url).searchParams.has('play'));
+ assert.ok(x.calls.every(c=>!c.url.includes('alldebrid')&&!c.url.includes('real-debrid')));
+ for(const bad of ['javascript:alert(1)','https://user:pass@host','http://host/?token=x'])assert.throws(()=>x.torrents.torrentServerBase(bad));
+});
+test('long-press opens options without playing or uploading; explicit upload is a separate action',async()=>{
+ const x=setup(async(url)=>url.includes('/stream/')?{streams:[{infoHash:'e'.repeat(40)}]}:url.endsWith('/upload')?{status:'success',data:{magnets:[{id:8}]}}:{status:'success',data:{magnets:{id:8,statusCode:1}}});x.torrents.saveAccount('ad','TEST');
+ const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(20);x.view.querySelector('[data-source]').focus();assert.equal(d.onKey('hold'),true);
+ assert.match(x.w.document.querySelector('.sheet').textContent,/Upload to AllDebrid/);assert.match(x.w.document.querySelector('.sheet').textContent,/Open with another player/);assert.equal(x.calls.filter(c=>c.handoff).length,0);assert.ok(x.calls.every(c=>!c.url.endsWith('/upload')));
+ [...x.w.document.querySelectorAll('.sheet-item')].find(n=>n.textContent.includes('Upload to AllDebrid')).click();await delay(30);
+ assert.equal(x.calls.filter(c=>c.url.endsWith('/upload')).length,1);assert.equal(x.calls.filter(c=>c.handoff).length,0);d.destroy();
+});
+test('search Down reaches every suggestion and Up returns to the keyboard without escaping',async()=>{
+ const x=setup();const s=new x.SearchScreen(x.view,{},x.app);
+ x.view.querySelector('#sr-sugg').innerHTML=[1,2,3,4].map(i=>'<button class="f sugg" data-q="Spiderman '+i+'">Spiderman '+i+'</button>').join('');
+ x.view.querySelector('.kb .key:last-child').focus();assert.equal(s.onKey('down'),true);assert.equal(x.w.document.activeElement.id,'sr-dictate');s.onKey('down');
+ for(let i=0;i<4;i++){assert.equal(x.w.document.activeElement.dataset.q,'Spiderman '+(i+1));s.onKey('down');}
+ assert.equal(x.w.document.activeElement.dataset.q,'Spiderman 4');for(let i=0;i<4;i++)s.onKey('up');assert.equal(x.w.document.activeElement.id,'sr-dictate');s.destroy();
+});
+
+test('uncached Debrid add-on resolver URLs are never opened as direct playback',()=>{
+ const {torrents:t}=setup();const hash='a'.repeat(40);
+ const sources=t.normaliseSources([{name:'Torrentio AD download 1080p',url:'https://addon.test/alldebrid/PRIVATE/'+hash+'/film/0'}]);
+ assert.equal(sources.length,1);assert.equal(sources[0].url,'');assert.equal(sources[0].hash,hash);
+});
+
+test('a stalled Debrid availability check cannot hold up external playback indefinitely',async()=>{
+ const x=setup(async()=>new Promise(()=>{}));x.torrents.saveAccount('ad','TEST');const started=Date.now();
+ const result=await x.torrents.resolvePlayable({hash:'f'.repeat(40)},'ad',null,()=>{});
+ assert.equal(result.magnet,true);assert.ok(Date.now()-started<2000);assert.ok(x.calls.every(c=>!c.url.includes('/upload')));
+});
+
+test('a stale ready badge falls back to external playback instead of starting cloud preparation',async()=>{
+ const x=setup(async(url,method,body)=>({status:'success',data:{magnets:new URLSearchParams(body).get('status')==='ready'?[{id:7,hash:'a'.repeat(40),statusCode:4}]:{id:7,statusCode:1}}}));x.torrents.saveAccount('ad','TEST');
+ const source={hash:'a'.repeat(40),readyProviders:[{provider:'ad',id:7}]};
+ const result=await x.torrents.resolvePlayable(source,'ad',null,()=>{});assert.equal(result.magnet,true);assert.equal(source.readyProviders.length,0);
+ assert.ok(x.calls.every(c=>!c.url.includes('/upload')));
 });

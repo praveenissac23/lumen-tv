@@ -21,6 +21,7 @@
         <intent>
             <action android:name="android.speech.action.RECOGNIZE_SPEECH" />
         </intent>
+        <intent><action android:name="android.intent.action.VIEW" /><data android:scheme="magnet" /></intent>
         <!-- Download managers and external players the app can hand links to -->
         <package android:name="com.dv.adm" />
         <package android:name="com.dv.adm.pay" />

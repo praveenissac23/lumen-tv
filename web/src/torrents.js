@@ -9,6 +9,7 @@ const CATALOGUE = 'https://v3-cinemeta.strem.io';
 const cache = new Map();
 const jobs = new Map(); // in-memory IDs: retry preparation without adding the magnet again
 const KEY = 'debrid-accounts';
+const readyCache = new Map();
 export function accounts() {
   try {
     const value = JSON.parse(N.cacheRead(KEY) || '{}');
@@ -19,7 +20,7 @@ export function saveAccount(id, key) {
   const a = accounts();
   if (key) a[id] = { key }; else delete a[id];
   N.cacheWrite(KEY, JSON.stringify(a));
-  jobs.clear();
+  jobs.clear(); readyCache.clear();
 }
 export function preferredProvider() {
   const a = accounts(), id = setting('debridPreferred');
@@ -84,7 +85,15 @@ export function normaliseSources(streams) {
   // exclude the user's preferred 1080p releases further down the response.
   for (const s of streams.slice(0, 1000)) {
     if (!s || typeof s !== 'object') continue;
-    const url = mediaUrl(s.url), hash = /^[a-f\d]{40}$/i.test(s.infoHash || '') ? s.infoHash.toLowerCase() : '';
+    let url = mediaUrl(s.url), hash = /^[a-f\d]{40}$/i.test(s.infoHash || '') ? s.infoHash.toLowerCase() : '';
+    const providerText = [s.name,s.title,s.description].filter(Boolean).join(' ');
+    const pendingCloud = /\b(?:RD|AD)\s*(?:download|uncached)|not\s*cached/i.test(providerText);
+    if (url && pendingCloud) {
+      // A Debrid add-on's download resolver may create a cloud job just by opening
+      // its URL. Convert it back to a magnet, never send that resolver to VLC.
+      if (!hash) { try { hash = /(?:^|\/)([a-f\d]{40})(?:\/|$)/i.exec(new URL(url).pathname)?.[1]?.toLowerCase() || ''; } catch { } }
+      url = '';
+    }
     // External web pages and streams requiring request headers cannot be handed to every player.
     if ((!url && !hash) || s.behaviorHints?.proxyHeaders?.request) continue;
     const fileIdx = Number.isInteger(s.fileIdx) && s.fileIdx >= 0 ? s.fileIdx : null;
@@ -100,7 +109,7 @@ export function normaliseSources(streams) {
   }
   const quality = +(setting('torrentQuality') || 1080);
   const distance = (s) => s.quality === quality ? 0 : !s.quality ? 10000 : s.quality < quality ? quality - s.quality : 3000 + s.quality;
-  return out.sort((a, b) => Number(b.sourceType === 'internet') - Number(a.sourceType === 'internet') || Number(!!b.url) - Number(!!a.url) || distance(a) - distance(b) || (b.seeds || 0) - (a.seeds || 0)).slice(0, 150);
+  return out.sort((a, b) => Number(!!b.url) - Number(!!a.url) || Number(b.sourceType === 'internet') - Number(a.sourceType === 'internet') || distance(a) - distance(b) || (b.seeds || 0) - (a.seeds || 0)).slice(0, 150);
 }
 export function searchProviders() {
   const providers = [];
@@ -130,7 +139,7 @@ export async function findSources(type, id, { refresh = false } = {}) {
     const sources = normaliseSources(results.reduce((all, p) => all.concat(p.streams), []));
     sources.sourceErrors = errors;
     const count = sources.filter((s) => s.sourceType === 'internet').length;
-    sources.sourceSummary = `${count} internet torrents${sources.length > count ? ` · ${sources.length - count} additional sources` : ''}. Debrid is used when you play a torrent.`;
+    sources.sourceSummary = `${count} internet torrents${sources.length > count ? ` · ${sources.length - count} additional sources` : ''}. Ready video links play directly. Hold OK for source actions.`;
     if (errors.length) sources.sourceSummary += ' Unavailable: ' + errors.join(', ') + '.';
     return sources;
   });
@@ -195,7 +204,7 @@ export async function chooseVideo(files, stream, episode, choose) {
   return selected;
 }
 // One bounded status check per click; preparing torrents stay in the provider's cloud.
-export async function resolveSource(stream, provider, episode, choose, active = () => true) {
+export async function resolveSource(stream, provider, episode, choose, active = () => true, existingOnly = false) {
   if (!active()) throw new Error('Cancelled');
   if (stream.url) return { url: stream.url };
   if (!stream.hash) throw new Error('This source is not supported.');
@@ -203,6 +212,7 @@ export async function resolveSource(stream, provider, episode, choose, active = 
   const jk = provider + ':' + stream.hash + ':' + (episode?.id || '') + ':' + (stream.fileIdx ?? '');
   let job = jobs.get(jk);
   if (provider === 'rd') {
+    if (!job && existingOnly) throw new Error('This source is no longer ready in Real-Debrid. Nothing was uploaded.');
     if (!job) {
       const r = await api('rd', 'torrents/addMagnet', 'POST', { magnet: 'magnet:?xt=urn:btih:' + stream.hash });
       if (!r.id) throw new Error('Real-Debrid did not accept the torrent.');
@@ -210,6 +220,7 @@ export async function resolveSource(stream, provider, episode, choose, active = 
     }
     let r = await api('rd', 'torrents/info/' + job.id);
     if (!active()) throw new Error('Cancelled');
+    if (r.status === 'waiting_files_selection' && existingOnly) throw new Error('This source is not ready in Real-Debrid. Nothing was uploaded.');
     if (r.status === 'waiting_files_selection') {
       const files = (r.files || []).map((f) => ({ name: f.path, size: f.bytes, id: f.id }));
       const f = await chooseVideo(files, stream, episode, choose);
@@ -231,6 +242,7 @@ export async function resolveSource(stream, provider, episode, choose, active = 
     if (!mediaUrl(unlocked.download)) throw new Error('Real-Debrid has not supplied a playable link.');
     return { url: unlocked.download, file: f.name.split('/').pop(), size: f.size };
   }
+  if (!job && existingOnly) throw new Error('This source is no longer ready in AllDebrid. Nothing was uploaded.');
   if (!job) {
     const r = await api('ad', 'v4/magnet/upload', 'POST', { 'magnets[]': 'magnet:?xt=urn:btih:' + stream.hash });
     const m = r.magnets?.[0];
@@ -252,4 +264,80 @@ export async function resolveSource(stream, provider, episode, choose, active = 
   const unlocked = await api('ad', 'v4/link/unlock', 'POST', { link: f.link });
   if (!mediaUrl(unlocked.link)) throw new Error('AllDebrid has not supplied a playable link.');
   return { url: unlocked.link, file: f.name.split('/').pop(), size: f.size };
+}
+
+
+export function magnetUrl(stream) {
+  if (!/^[a-f\d]{40}$/i.test(stream.hash || '')) throw new Error('No supported magnet link.');
+  return 'magnet:?xt=urn:btih:' + stream.hash;
+}
+export function torrentServerBase(value) {
+  const u = new URL(String(value || '').trim());
+  if (!/^https?:$/.test(u.protocol) || u.username || u.password || u.search || u.hash) throw new Error('Enter an HTTP or HTTPS TorrServer address without a password or query.');
+  return u.href.replace(/\/$/, '');
+}
+// Read-only checks. Connecting an account never means a torrent is cached.
+export async function readySources(sources, refresh = false) {
+  const found = new Map(), errors = [];
+  await Promise.all(Object.keys(PROVIDERS).filter(p => accounts()[p]?.key).map(async provider => {
+    const key = provider + ':' + accounts()[provider].key;
+    let entry = readyCache.get(key);
+    try {
+      if (refresh || !entry || Date.now() - entry.time > 30000) {
+        const promise = (async () => {
+          const result = provider === 'rd' ? await api('rd', 'torrents?limit=1000') : await api('ad', 'v4.1/magnet/status', 'POST', { status:'ready' });
+          const list = provider === 'rd' ? result : result.magnets;
+          const rows = Array.isArray(list) ? list : list?.id ? [list] : [];
+          return rows.filter(m => provider === 'rd' ? m.status === 'downloaded' : +m.statusCode === 4).map(m => {
+            let hash = String(m.hash || '').toLowerCase();
+            if (!/^[a-f\d]{40}$/.test(hash)) {
+              const known = [...jobs.entries()].find(([k,j]) => k.startsWith(provider+':') && String(j.id) === String(m.id));
+              hash = known ? known[0].split(':')[1] : '';
+            }
+            return {hash,id:m.id,provider};
+          }).filter(m => /^[a-f\d]{40}$/.test(m.hash) && m.id != null);
+        })();
+        entry = { time:Date.now(), promise }; readyCache.set(key,entry);
+        promise.catch(() => readyCache.delete(key));
+      }
+      for (const m of await entry.promise) if (sources.some(s => s.hash === m.hash)) {
+        const list = found.get(m.hash) || []; list.push(m); found.set(m.hash,list);
+      }
+    } catch { errors.push(PROVIDERS[provider]); }
+  }));
+  return { found, errors };
+}
+export async function resolvePlayable(stream, provider, episode, choose, active = () => true) {
+  if (!active()) throw new Error('Cancelled');
+  if (stream.url) return {url:stream.url};
+  let availabilityTimer;
+  const {found} = await Promise.race([readySources([stream]), new Promise(resolve => { availabilityTimer=setTimeout(()=>resolve({found:new Map()}),1200); })]).finally(()=>clearTimeout(availabilityTimer));
+  if (!active()) throw new Error('Cancelled');
+  const available = found.get(stream.hash) || [];
+  const ready = available.find(m => m.provider === provider) || available[0];
+  if (ready) {
+    const jk = ready.provider + ':' + stream.hash + ':' + (episode?.id || '') + ':' + (stream.fileIdx ?? '');
+    jobs.set(jk,{id:ready.id});
+    try { return await resolveSource(stream,ready.provider,episode,choose,active,true); }
+    catch(e) { if(e.message==='Cancelled' || !active()) throw new Error('Cancelled'); readyCache.clear(); stream.readyProviders=[]; }
+  }
+  const configured = setting('torrentServer');
+  if (!configured) return {url:magnetUrl(stream),magnet:true};
+  const base = torrentServerBase(configured), query = new URLSearchParams({link:magnetUrl(stream)});
+  let metadata;
+  try { metadata = JSON.parse(await N.http(base+'/stream?'+query+'&stat', {timeout:20000})); }
+  catch { throw new Error('Torrent streaming server is unavailable. Check TorrServer in settings. Nothing was uploaded to Debrid.'); }
+  if (!active()) throw new Error('Cancelled');
+  const files = (metadata.file_stats || []).slice().sort((a,b)=>a.id-b.id).map(f=>({name:f.path,size:f.length,id:f.id}));
+  const file = await chooseVideo(files,stream,episode,choose);
+  if (!active()) throw new Error('Cancelled');
+  query.set('index',String(file.id)); query.set('play','');
+  return {url:base+'/stream?'+query,file:file.name.split('/').pop(),size:file.size};
+}
+export async function prepareDebrid(stream, provider, episode, choose, active) {
+  if (!stream.hash) throw new Error('This source contains a video link, not a torrent to upload.');
+  readyCache.clear();
+  try { await resolveSource({...stream,url:''},provider,episode,choose,active); return true; }
+  catch(e) { if (/^Preparing in /.test(e.message)) return false; throw e; }
+  finally { readyCache.clear(); }
 }
