@@ -149,8 +149,10 @@ async function api(id, path, method = 'GET', fields, overrideKey) {
   try { r = raw ? JSON.parse(raw) : {}; } catch { throw new Error(`${PROVIDERS[id]} returned an invalid response.`); }
   if (r.error || r.status === 'error') {
     const code = String(id === 'rd' ? r.error_code ?? r.error : r.error?.code || '');
-    if (id === 'rd' ? /^(8|9|bad_token)$/.test(code) : /^(AUTH_|API_KEY)/.test(code)) throw new Error(`${PROVIDERS[id]} key is invalid or expired. Reconnect it in Debrid settings.`);
-    if (id === 'rd' ? /^(10|11|20)$/.test(code) : /PREMIUM|SUBSCRIPTION/.test(code)) throw new Error(`${PROVIDERS[id]} subscription is required or has expired.`);
+    if (id === 'rd' ? /^(8|bad_token)$/.test(code) : /^(AUTH_|API_KEY)/.test(code)) throw new Error(`${PROVIDERS[id]} key is invalid or expired. Reconnect it in Debrid settings.`);
+    if (id === 'rd' && /^(10|11)$/.test(code)) throw new Error('Real-Debrid requires account verification. Complete it on the Real-Debrid website, then retry.');
+    if (id === 'rd' && /^(9|14|15)$/.test(code)) throw new Error('Real-Debrid denied account access. Check your account status and subscription.');
+    if (id === 'rd' ? /^20$/.test(code) : /PREMIUM|SUBSCRIPTION/.test(code)) throw new Error(`${PROVIDERS[id]} subscription is required or has expired.`);
     throw new Error(`${PROVIDERS[id]} could not complete this request. Try another source or check your subscription.`);
   }
   return id === 'ad' ? r.data || {} : r;

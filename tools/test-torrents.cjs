@@ -256,3 +256,10 @@ test('ranking happens before limiting a large internet response to 150 TV rows',
  streams.push({infoHash:'f'.repeat(40),name:'1080p',_lumenScope:'internet'});
  const sources=x.torrents.normaliseSources(streams); assert.equal(sources.length,150); assert.equal(sources[0].quality,1080);
 });
+
+for(const [code,message] of [[10,/account verification/],[11,/account verification/],[9,/denied account access/],[20,/subscription is required/]]) {
+ test('Real-Debrid error '+code+' uses documented account feedback',async()=>{
+  const x=setup(async()=>({error:'provider error',error_code:code}));x.torrents.saveAccount('rd','TEST');
+  await assert.rejects(()=>x.torrents.resolveSource({hash:'a'.repeat(40)},'rd',null,()=>{}),message);
+ });
+}
