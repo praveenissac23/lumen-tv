@@ -54,10 +54,10 @@ try:
     assert 'Internet · Torrentio' in page.locator('[data-source="0"]').inner_text()
     assert 'internet torrents' in page.locator('#td-status').inner_text()
     # OK on the remote routes the focused row straight to playback, once.
-    page.evaluate("window.__plays=[];__app.current().ctl.launch=function(download){window.__plays.push({index:this.index,download})}")
+    page.evaluate("window.__plays=[];window.__keyTrace=[];for(const event of ['keydown','keyup','click'])document.addEventListener(event,e=>__keyTrace.push({event,key:e.key,target:e.target.outerHTML.slice(0,100)}),true);__app.current().ctl.launch=function(download){window.__plays.push({index:this.index,download})}")
     page.locator('[data-source="0"]').focus()
     page.keyboard.press('Enter')
-    assert page.evaluate('JSON.stringify(__plays)') == '[{"index":0,"download":false}]'
+    assert page.evaluate('JSON.stringify(__plays)') == '[{"index":0,"download":false}]', page.evaluate('JSON.stringify({plays:__plays,trace:__keyTrace,active:document.activeElement.outerHTML})')
     assert 'OK · Play' in page.locator('[data-source="0"]').inner_text()
     for _ in range(12):
         page.keyboard.press('ArrowDown')
