@@ -117,8 +117,8 @@ export class TorrentDetailScreen {
     if (source.hash && !source.url) return PROVIDERS[this.provider || preferredProvider()] || '';
     // Label only known provider hostnames or explicit add-on provider markers.
     let host = ''; try { host = new URL(source.url).hostname; } catch { }
-    if (/(^|\.)real-debrid\.(com|net)$/.test(host) || /\[RD[+ ]?\]/i.test(source.text)) return 'Real-Debrid link';
-    if (/(^|\.)alldebrid\.(com|net)$/.test(host) || /\[AD[+ ]?\]/i.test(source.text)) return 'AllDebrid link';
+    if (/(^|\.)real-debrid\.(com|net)$/.test(host) || /(?:\[RD[+ ]?\]|\bRD\+)/i.test(source.text)) return 'Real-Debrid link';
+    if (/(^|\.)alldebrid\.(com|net)$/.test(host) || /(?:\[AD[+ ]?\]|\bAD\+)/i.test(source.text)) return 'AllDebrid link';
     return '';
   }
   activateSource(button) {

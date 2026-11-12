@@ -297,3 +297,10 @@ test('Debrid badges update when account changes and known direct links show prov
  assert.ok(routes.includes('AllDebrid'));assert.ok(routes.includes('Real-Debrid link'));
  assert.equal(d.sourceProvider({url:'https://real-debrid.com.evil.test/video',text:''}),'');d.destroy();
 });
+
+test('direct add-on streams marked Torrentio RD+ or AD+ keep clear Debrid badges',async()=>{
+ const x=setup(async()=>({streams:[{name:'Torrentio RD+ 1080p',url:'https://addon.test/rd'},{name:'Torrentio AD+ 1080p',url:'https://addon.test/ad'}]}));
+ const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(20);
+ const badges=[...x.view.querySelectorAll('.td-route-debrid [data-route]')].map(n=>n.textContent);
+ assert.ok(badges.includes('Real-Debrid link'));assert.ok(badges.includes('AllDebrid link'));d.destroy();
+});
