@@ -96,8 +96,13 @@ try:
     assert 'Open with another player' in page.locator('.sheet').inner_text()
     assert not mutations,mutations
     page.screenshot(path=str(ROOT/'build/navigation-shots/torrent-long-press.png'))
+    page.locator('.sheet-item').filter(has_text='Download using').click()
+    page.wait_for_selector('.sheet h2')
+    assert '1DM' in page.locator('.sheet').inner_text()
+    page.screenshot(path=str(ROOT/'build/navigation-shots/torrent-download-choices.png'))
     page.keyboard.press('Escape')
     page.wait_for_selector('.sheet-wrap',state='detached')
+    focused()
     # OK on the remote routes the focused row straight to playback, once.
     page.evaluate("window.__plays=[];__app.current().ctl.launch=function(download){window.__plays.push({index:this.index,download})};true")
     page.locator('[data-source="0"]').focus()

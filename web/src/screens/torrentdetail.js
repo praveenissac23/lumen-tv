@@ -181,7 +181,9 @@ export class TorrentDetailScreen {
       else this.launch(false,{prepareProvider:provider});
     } else if(choice==='download') {
       const pkg=await sheet({title:'Download using',options:[...N.installedApps().filter(a=>a.role==='download').map(a=>({label:a.name,value:a.pkg,icon:'download'})),{label:'Other downloader (IDM / Radium…)',value:'__other',icon:'external'}]});
-      if(!this.dead && pkg!=null) this.launch(true,{pkg:pkg==='__other'?'':pkg});
+      if(this.dead) return;
+      focus(this.view.querySelector(`[data-source="${this.index}"]`));
+      if(pkg!=null) this.launch(true,{pkg:pkg==='__other'?'':pkg});
     }
   }
   openMagnet(stream, pkg='') {

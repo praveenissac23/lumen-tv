@@ -3,7 +3,7 @@ const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
 const esbuild = require('esbuild');
-const bundle = esbuild.buildSync({ stdin: { contents: `import * as ui from './web/src/ui.js'; import * as torrents from './web/src/torrents.js'; import * as store from './web/src/store.js'; import {SearchScreen} from './web/src/screens/searchview.js'; import {TorrentDetailScreen} from './web/src/screens/torrentdetail.js'; import {SettingsScreen} from './web/src/screens/settings.js'; window.testAPI={ui,torrents,store,SearchScreen,TorrentDetailScreen,SettingsScreen};`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
+const bundle = esbuild.buildSync({ stdin: { contents: `import * as nav from './web/src/nav.js'; import * as ui from './web/src/ui.js'; import * as torrents from './web/src/torrents.js'; import * as store from './web/src/store.js'; import {SearchScreen} from './web/src/screens/searchview.js'; import {TorrentDetailScreen} from './web/src/screens/torrentdetail.js'; import {SettingsScreen} from './web/src/screens/settings.js'; window.testAPI={nav,ui,torrents,store,SearchScreen,TorrentDetailScreen,SettingsScreen};`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
 const windows = [];
 const runtimeErrors = [];
 function setup(handler = async () => ({}), seed = {}, imageHandler) {
@@ -364,4 +364,12 @@ test('a stale ready badge falls back to external playback instead of starting cl
  const source={hash:'a'.repeat(40),readyProviders:[{provider:'ad',id:7}]};
  const result=await x.torrents.resolvePlayable(source,'ad',null,()=>{});assert.equal(result.magnet,true);assert.equal(source.readyProviders.length,0);
  assert.ok(x.calls.every(c=>!c.url.includes('/upload')));
+});
+
+test('cancelling the nested downloader chooser returns focus to the selected source',async()=>{
+ const x=setup(async()=>({streams:[{url:'https://cdn.test/film.mp4'}]}));const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(20);
+ const row=x.view.querySelector('[data-source]');row.focus();d.onKey('hold');
+ [...x.w.document.querySelectorAll('.sheet-item')].find(n=>n.textContent.includes('Download using')).click();await delay(10);
+ assert.match(x.w.document.querySelector('.sheet').textContent,/1DM/);
+ x.nav.topLayer().onKey('back');await delay(10);assert.equal(x.w.document.activeElement,row);assert.equal(x.calls.filter(c=>c.handoff).length,0);d.destroy();
 });
