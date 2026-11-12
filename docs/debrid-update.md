@@ -37,3 +37,11 @@ An earlier candidate was 1,382,600 bytes versus 1,373,363 bytes for build 36. No
 - A source add-on must be configured by the user; no torrent index is bundled. HTTP(S) direct streams and v1 hexadecimal info hashes are supported. Streams requiring custom HTTP headers, external web pages, or unsupported hash formats are excluded.
 
 The release workflow publishes only main-branch builds after all checks pass. The original uploaded APK remains unchanged. The same app ID and certificate allow the installed application's updater to install the newer version in place.
+
+## Internet torrent search (build 44)
+
+Internet torrent search is enabled by default through Torrentio, independently of saved Debrid accounts. A configured Stremio add-on is now additional and cannot restrict the built-in search to cloud-only or cached-only results. Internet results are labelled and ranked first, followed by preferred quality and seed count. Up to 150 ranked sources are displayed; ranking precedes the display limit. Provider outages are shown explicitly and failed partial responses are not cached.
+
+Debrid still resolves the selected raw torrent for playback/download using the existing player and download settings. Uncached torrents may need cloud preparation. This is search across supported public torrent indexes, not a crawler of every website on the internet.
+
+Validation: 26 service/DOM tests pass; browser tests cover independent internet and additional sources plus previous navigation and thumbnail recovery. The live unconfigured internet provider returned raw torrent hashes for a public-domain test film without any Debrid credentials.
