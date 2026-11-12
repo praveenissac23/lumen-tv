@@ -29,6 +29,11 @@ try:
         for key in ['ArrowDown','ArrowDown','ArrowRight','ArrowDown','ArrowLeft','ArrowUp']:
             page.keyboard.press(key)
             focused()
+    page.evaluate('__app.go("settings",{}, {root:true})')
+    for _ in range(13):
+        page.keyboard.press('ArrowDown')
+        focused()
+    page.wait_for_function('document.activeElement.dataset.sec === "about" && document.activeElement.getBoundingClientRect().bottom <= innerHeight')
     page.evaluate('__app.go("search",{q:"harbour"},{root:true})')
     page.wait_for_selector('[data-torrent="0"]',state='attached')
     assert page.locator('[data-tab=lumen]').get_attribute('aria-pressed') == 'true'

@@ -32,8 +32,8 @@ export class SettingsScreen {
     this.app = app; this.view = view;
     this.sec = params.restore?.sec || 'playlists';
     view.innerHTML = `<div class="st">
-      <nav class="st-nav" data-group="stnav" data-zone="stnav"><h2 class="col-h">Settings</h2>
-        ${SECTIONS.map(([k, l, ic]) => `<button class="f st-sec ${k === this.sec ? 'on' : ''}" data-sec="${k}">${icon(ic)}<span>${l}</span></button>`).join('')}</nav>
+      <nav class="st-nav" data-zone="stnav" data-scroll="y" data-pad="12"><div class="st-nav-track" data-group="stnav"><h2 class="col-h">Settings</h2>
+        ${SECTIONS.map(([k, l, ic]) => `<button class="f st-sec ${k === this.sec ? 'on' : ''}" data-sec="${k}">${icon(ic)}<span>${l}</span></button>`).join('')}</div></nav>
       <section class="st-panel" data-scroll="y" data-pad="40" data-zone="stbody"><div class="st-track" id="st-body" data-group="stbody"></div></section></div>`;
     view.querySelector('.st-nav').addEventListener('click', (e) => { const b = e.target.closest('[data-sec]'); if (b) { this.show(b.dataset.sec); focusFirst(view.querySelector('#st-body')); } });
     view.querySelector('.st-nav').addEventListener('focused', (e) => { const b = e.target.closest('[data-sec]'); if (b && b.dataset.sec !== this.sec) this.show(b.dataset.sec); });

@@ -366,7 +366,9 @@ body.playing #app { visibility: hidden; }
 
 /* ---------- settings ---------- */
 .st { position: absolute; inset: 0; display: grid; grid-template-columns: 400px 1fr; gap: 64px; padding: 46px var(--right) 0 56px; }
-.st-nav { display: flex; flex-direction: column; gap: 4px; }
+.st-nav { min-height:0; overflow:hidden; }
+.st-nav-track { position:relative; display:flex; flex-direction:column; gap:4px; transition:transform .16s var(--ease); }
+.st-nav-track > .st-sec { flex:none; }
 .st-sec { display: flex; align-items: center; gap: 20px; height: 68px; padding: 0 22px; border-radius: var(--r-row); color: var(--text-2); }
 .st-sec .ic { font-size: 26px; }
 .st-sec.on { background: var(--surface); color: var(--text); }
