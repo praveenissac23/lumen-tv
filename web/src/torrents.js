@@ -147,7 +147,12 @@ async function api(id, path, method = 'GET', fields, overrideKey) {
   catch { throw new Error(`${PROVIDERS[id]} request failed. Check your key, subscription and connection.`); }
   let r;
   try { r = raw ? JSON.parse(raw) : {}; } catch { throw new Error(`${PROVIDERS[id]} returned an invalid response.`); }
-  if (r.error || r.status === 'error') throw new Error(`${PROVIDERS[id]} could not complete this request. Check your subscription or try another source.`);
+  if (r.error || r.status === 'error') {
+    const code = String(id === 'rd' ? r.error_code ?? r.error : r.error?.code || '');
+    if (id === 'rd' ? /^(8|9|bad_token)$/.test(code) : /^(AUTH_|API_KEY)/.test(code)) throw new Error(`${PROVIDERS[id]} key is invalid or expired. Reconnect it in Debrid settings.`);
+    if (id === 'rd' ? /^(10|11|20)$/.test(code) : /PREMIUM|SUBSCRIPTION/.test(code)) throw new Error(`${PROVIDERS[id]} subscription is required or has expired.`);
+    throw new Error(`${PROVIDERS[id]} could not complete this request. Try another source or check your subscription.`);
+  }
   return id === 'ad' ? r.data || {} : r;
 }
 export async function validateAccount(id, key) {
@@ -172,19 +177,24 @@ export function flattenFiles(files, prefix = '') {
 export async function chooseVideo(files, stream, episode, choose) {
   const videos = videoFiles(files);
   if (!videos.length) throw new Error('No playable video file was found in this torrent.');
-  if (stream.fileIdx != null && files[stream.fileIdx] && videos.includes(files[stream.fileIdx])) return files[stream.fileIdx];
+  let candidates = videos;
   if (episode) {
     const se = new RegExp(`(?:s0*${episode.season}e0*${episode.episode}(?!\\d)|\\b0*${episode.season}x0*${episode.episode}(?!\\d))`, 'i');
     const matches = videos.filter((f) => se.test(f.name));
     if (matches.length === 1) return matches[0];
+    // Never silently select a clearly different episode, even when the index says so.
+    candidates = matches.length ? matches : videos.filter((f) => !/(?:s\d+e\d+|\b\d+x\d+)/i.test(f.name));
+    if (!candidates.length) throw new Error('The requested episode was not found in this torrent. Try another source.');
   }
-  if (videos.length === 1) return videos[0];
-  const selected = await choose(videos);
+  if (stream.fileIdx != null && candidates.includes(files[stream.fileIdx])) return files[stream.fileIdx];
+  if (candidates.length === 1) return candidates[0];
+  const selected = await choose(candidates);
   if (!selected) throw new Error('Cancelled');
   return selected;
 }
 // One bounded status check per click; preparing torrents stay in the provider's cloud.
 export async function resolveSource(stream, provider, episode, choose, active = () => true) {
+  if (!active()) throw new Error('Cancelled');
   if (stream.url) return { url: stream.url };
   if (!stream.hash) throw new Error('This source is not supported.');
   if (!provider) throw new Error('Connect a Debrid account in Settings > Debrid and torrents.');
@@ -214,6 +224,7 @@ export async function resolveSource(stream, provider, episode, choose, active = 
     const allFiles = (r.files || []).map((f) => selected.find((s) => s.id === f.id) || { name: f.path, size: f.bytes });
     const f = job.file ? selected.find((s) => s.id === job.file) : await chooseVideo(allFiles, stream, episode, choose);
     if (!f?.link) throw new Error('The requested file is not ready. Try another source.');
+    if (!active()) throw new Error('Cancelled');
     const unlocked = await api('rd', 'unrestrict/link', 'POST', { link: f.link });
     if (!mediaUrl(unlocked.download)) throw new Error('Real-Debrid has not supplied a playable link.');
     return { url: unlocked.download, file: f.name.split('/').pop(), size: f.size };
@@ -234,7 +245,7 @@ export async function resolveSource(stream, provider, episode, choose, active = 
   const result = await api('ad', 'v4/magnet/files', 'POST', { 'id[]': job.id });
   const files = flattenFiles(result.magnets?.find((x) => String(x.id) === String(job.id))?.files || m.files);
   // AllDebrid's file tree has no torrent file-index guarantee: match episode or ask.
-  const f = await chooseVideo(files, { ...stream, fileIdx: null }, episode, choose);
+  const f = await chooseVideo(files.filter(f => mediaUrl(f.link)), { ...stream, fileIdx: null }, episode, choose);
   if (!active()) throw new Error('Cancelled');
   const unlocked = await api('ad', 'v4/link/unlock', 'POST', { link: f.link });
   if (!mediaUrl(unlocked.link)) throw new Error('AllDebrid has not supplied a playable link.');

@@ -1,7 +1,7 @@
 import { findSources, titleMeta, resolveSource, preferredProvider, PROVIDERS, searchProviders } from '../torrents.js';
-import { setting, S, sessionUnlocked, unlockSession } from '../store.js';
+import { setting } from '../store.js';
 import { esc, bytes, safeFile } from '../util.js';
-import { icon, poster, sheet, pinPad } from '../ui.js';
+import { icon, poster, sheet } from '../ui.js';
 import { focus } from '../nav.js';
 import { sendToDownloader } from '../actions.js';
 import { playVod } from '../player.js';
@@ -42,15 +42,6 @@ export class TorrentDetailScreen {
     };
     view.addEventListener('focused', (e) => { if (e.target.dataset.source != null) { this.index = +e.target.dataset.source; this.markSelection(); } });
     this.actions(false);
-    this.authoriseAndLoad();
-  }
-  async authoriseAndLoad() {
-    if (setting('lockAdult') && !sessionUnlocked('torrents', 'catalogue')) {
-      const ok = await pinPad({ title: 'Unlock online search', subtitle: 'Online titles are outside your IPTV parental categories.', check: (v) => v === S.pin });
-      if (this.dead) return;
-      if (!ok) { this.app.back(); return; }
-      unlockSession('torrents', 'catalogue');
-    }
     this.load();
   }
   list(html, move = false) {
@@ -84,7 +75,7 @@ export class TorrentDetailScreen {
     } catch (e) { if (!this.dead) this.list(`<p class="st-intro">${esc(e.message)}</p>`); }
   }
   paintEpisodes(move = false) {
-    this.phase = 'episodes'; this.actions(false); this.status('');
+    this.busy = false; this.phase = 'episodes'; this.actions(false); this.status('');
     this.view.querySelector('#td-heading').textContent = 'Choose an episode';
     this.view.querySelector('#td-season-pick').textContent = 'Season ' + this.season;
     // Draw only a page of episodes, not thousands of focusable DOM nodes.
@@ -97,7 +88,7 @@ export class TorrentDetailScreen {
   }
   async loadSources(move = false, refresh = false) {
     const token = ++this.token;
-    this.phase = 'sources'; this.sources = []; this.actions(false); this.status('Searching internet torrent indexes…');
+    this.busy = false; this.phase = 'sources'; this.sources = []; this.actions(false); this.status('Searching internet torrent indexes…');
     this.view.querySelector('#td-heading').textContent = this.episode ? `S${this.episode.season} E${this.episode.episode} · Sources` : 'Choose a source';
     this.list('<p class="st-intro">Loading sources…</p>');
     if (!searchProviders().length) {
@@ -151,7 +142,7 @@ export class TorrentDetailScreen {
         playVod({ title: this.item.name, sub, url: result.url, poster: this.item.img, kind: this.episode ? 'episode' : 'movie', id: key, year: this.item.year, torrentItem: this.item, torrentEpisode: this.episode }, key, () => this.app.reload());
       }
     } catch (e) { if (alive()) this.status(e.message === 'Cancelled' ? 'Selection cancelled.' : e.message); }
-    finally { this.busy = false; if (alive()) { this.actions(true); if (!this.view.contains(document.activeElement)) focus(this.view.querySelector(`[data-source="${this.index}"]`)); } }
+    finally { if (alive()) { this.busy = false; this.actions(true); if (!this.view.contains(document.activeElement)) focus(this.view.querySelector(`[data-source="${this.index}"]`)); } }
   }
   onKey(k) {
     if (k === 'back' && this.episode && this.item.type === 'series' && this.phase === 'sources') {

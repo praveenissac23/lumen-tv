@@ -36,6 +36,22 @@ jobs:
           python -m playwright install --with-deps chromium
           python tools/test-navigation.py
 
+      - name: Enable Android emulator acceleration
+        run: |
+          echo 'KERNEL=="kvm", GROUP="kvm", MODE="0666", OPTIONS+="static_node=kvm"' | sudo tee /etc/udev/rules.d/99-kvm4all.rules
+          sudo udevadm control --reload-rules
+          sudo udevadm trigger --name-match=kvm
+
+      - name: Check artwork in Android WebView
+        uses: reactivecircus/android-emulator-runner@v2
+        with:
+          api-level: 29
+          arch: x86_64
+          target: google_apis
+          disable-animations: true
+          working-directory: android
+          script: chmod +x gradlew && ./gradlew --no-daemon connectedDebugAndroidTest
+
       - name: Restore the signing key (private repository secret)
         env:
           KEYSTORE_B64: ${{ secrets.KEYSTORE_B64 }}
@@ -92,6 +108,8 @@ jobs:
           path: |
             android/app/build/outputs/apk/release/app-release.apk
             build/navigation-shots/
+            android/app/build/reports/androidTests/
+            android/app/build/outputs/androidTest-results/
           if-no-files-found: ignore
 
       - name: Publish the release

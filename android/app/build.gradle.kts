@@ -9,6 +9,7 @@ android {
 
     defaultConfig {
         applicationId = "tv.lumen.app"
+        testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
         minSdk = 22          // Fire OS 5 / Android 5.1 and newer
         targetSdk = 34
         // GitHub sets BUILD_NUMBER to the build count, so every build is a newer version.
@@ -55,6 +56,8 @@ android {
 }
 
 dependencies {
+    androidTestImplementation("androidx.test:runner:1.6.2")
+    androidTestImplementation("androidx.test.ext:junit:1.2.1")
     val media3 = "1.4.1"
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-exoplayer-hls:$media3")

@@ -1,9 +1,9 @@
 // Master search: on-screen keyboard + voice, instant grouped results.
 import { C, needsPin } from '../data.js';
-import { S, pushSearch, isFav, setting, sessionUnlocked, unlockSession } from '../store.js';
+import { S, pushSearch, isFav } from '../store.js';
 import { esc, hhmm, now, dayLabel, debounce } from '../util.js';
 import { focus } from '../nav.js';
-import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots, pinPad } from '../ui.js';
+import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots } from '../ui.js';
 import { findTitles } from '../torrents.js';
 import { search, suggestFrom, searchOnTv } from '../search.js';
 import { playLive, playCatchup } from '../player.js';
@@ -132,15 +132,7 @@ export class SearchScreen {
     this.view.querySelector('.sr-torrent-pane').hidden = this.tab !== 'torrents';
   }
   async switchTab(tab) {
-    if (tab === 'torrents' && setting('lockAdult') && !sessionUnlocked('torrents', 'catalogue')) {
-      if (this.unlocking) return;
-      this.unlocking = true;
-      const ok = await pinPad({ title: 'Unlock online search', subtitle: 'Online titles are outside your IPTV parental categories.', check: (v) => v === S.pin });
-      this.unlocking = false;
-      if (this.dead) return;
-      if (!ok) { focus(this.view.querySelector('[data-tab="lumen"]')); return; }
-      unlockSession('torrents', 'catalogue');
-    }
+    if (this.dead) return;
     this.tab = tab; this.applyTab();
     focus(this.view.querySelector(`[data-tab="${tab}"]`));
   }

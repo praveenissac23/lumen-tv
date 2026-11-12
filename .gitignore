@@ -16,3 +16,5 @@ mac/build/
 mac/build.log
 mac/errors.txt
 node_modules
+
+android/app/src/androidTest/assets/artwork-ui.js

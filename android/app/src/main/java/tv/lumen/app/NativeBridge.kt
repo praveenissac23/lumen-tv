@@ -27,12 +27,30 @@ import java.util.concurrent.Executors
 class NativeBridge(private val act: MainActivity) {
 
     private val io = Executors.newFixedThreadPool(6)   // channels, films and series download side by side
+    private val artworkIo = Executors.newFixedThreadPool(3) // never block catalogue/search calls behind posters
     private val bodies = ConcurrentHashMap<Int, String>()
     private val dir: File = File(act.filesDir, "cache").apply { mkdirs() }
     private var recognizer: SpeechRecognizer? = null
 
     private fun emit(evt: String, data: JSONObject) = act.emit(evt, data)
     private fun ui(block: () -> Unit) = act.runOnUiThread(block)
+
+    @JavascriptInterface
+    fun artwork(id: Int, url: String, width: Int) {
+        artworkIo.execute {
+            try {
+                require(url.startsWith("https://") || url.startsWith("http://"))
+                val response = act.thumbs.serve(url, width)
+                check(response.statusCode == 200) { "Image unavailable" }
+                val bytes = response.data.use { it.readBytes() }
+                check(bytes.isNotEmpty()) { "Empty image" }
+                bodies[id] = "data:image/jpeg;base64," + android.util.Base64.encodeToString(bytes, android.util.Base64.NO_WRAP)
+                emit("artwork", JSONObject().put("id", id).put("ok", true))
+            } catch (e: Exception) {
+                emit("artwork", JSONObject().put("id", id).put("ok", false).put("error", "Image could not be loaded"))
+            }
+        }
+    }
 
     // ---------- device ----------
     @JavascriptInterface
@@ -478,5 +496,6 @@ class NativeBridge(private val act: MainActivity) {
     fun release() {
         recognizer?.destroy()
         io.shutdownNow()
+        artworkIo.shutdownNow()
     }
 }

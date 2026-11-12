@@ -17,11 +17,11 @@ let seq = 0;
 // Native -> JS entry point.
 window.__nat = (evt, data) => {
   if (typeof data === 'string') { try { data = JSON.parse(data); } catch { /* keep string */ } }
-  if (evt === 'head' || evt === 'call') {
+  if (evt === 'head' || evt === 'call' || evt === 'artwork') {
     const p = pending.get(data.id);
-    if (!p) return;
+    if (!p) { if (evt === 'artwork' && data.ok) N.take(data.id); return; }
     pending.delete(data.id);
-    if (data.ok) p.resolve(evt === 'call' ? N.take(data.id) : data); else p.reject(new Error(data.error || 'Request failed'));
+    if (data.ok) p.resolve(evt === 'call' || evt === 'artwork' ? N.take(data.id) : data); else p.reject(new Error(data.error || 'Request failed'));
     return;
   }
   if (evt === 'http' || evt === 'catalog' || (evt === 'epg' && data.id != null)) {
@@ -40,6 +40,19 @@ export function device() {
   if (N) { try { return JSON.parse(N.deviceInfo()); } catch { /* fallthrough */ } }
   const sr = !!(window.SpeechRecognition || window.webkitSpeechRecognition);
   return { fireTv: false, voice: sr, model: 'Browser', version: 'dev' };
+}
+
+export const hasArtworkBridge = !!(N && N.artwork);
+// Binary artwork is delivered through the existing native bridge, avoiding WebView
+// network requests and the old synthetic thumbnail hostname entirely.
+export function artwork(url, width) {
+  if (!hasArtworkBridge) return null;
+  const id = ++seq;
+  return new Promise((resolve, reject) => {
+    const timer = setTimeout(() => { pending.delete(id); reject(new Error('Image request timed out')); }, 25000);
+    pending.set(id, { resolve: (v) => { clearTimeout(timer); resolve(v); }, reject: (e) => { clearTimeout(timer); reject(e); } });
+    try { N.artwork(id, url, width); } catch (e) { pending.delete(id); clearTimeout(timer); reject(e); }
+  });
 }
 
 // GET a URL as text. Native side does the request (no CORS, keeps connections warm).

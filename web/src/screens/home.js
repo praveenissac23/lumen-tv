@@ -6,7 +6,7 @@ import { itemActions } from '../actions.js';
 import { update, installUpdate } from '../updates.js';
 import { esc, hhmm, now, minutesLeft, tint } from '../util.js';
 import { focus, reveal } from '../nav.js';
-import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots, imgUrl, artworkImage, directImageUrl } from '../ui.js';
+import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots, resolveArtwork, artworkImage, directImageUrl } from '../ui.js';
 import { prefetchNow, hasProgs } from '../epg.js';
 import { preview, stopPreview, playLive, playVod, playCatchup } from '../player.js';
 import { movieUrl, episodeUrl, seriesInfo } from '../data.js';
@@ -433,7 +433,7 @@ export class HomeScreen {
           const p = this.view.querySelector('#bb-plot'); if (p && inf.plot && !it.plot) p.textContent = inf.plot;
           if (inf.backdrop) {
             const a = this.view.querySelector('#bb-bg .bb-art');
-            if (a) { const im = new Image(); im.className = 'bb-wide'; im.alt = ''; im.dataset.original = directImageUrl(inf.backdrop, 960); im.onerror = () => window.__lumenImageError(im); im.onload = () => { if (this.bbKey === key) { a.appendChild(im); a.classList.add('wide'); } }; im.src = imgUrl(inf.backdrop, 960); }
+            if (a) { const im = new Image(); im.className = 'bb-wide'; im.alt = ''; im.dataset.original = directImageUrl(inf.backdrop, 960); im.onerror = () => window.__lumenImageError(im); im.onload = () => { if (this.bbKey === key) { a.appendChild(im); a.classList.add('wide'); } }; resolveArtwork(inf.backdrop, 960).then(src => { if (a.isConnected && this.bbKey === key) im.src = src; }); }
           }
         }).catch(() => {});
       }, 450);

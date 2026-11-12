@@ -15,3 +15,7 @@ if [ -d "$ROOT/android/app/src/main" ]; then
   mv "$ASSETS/demo.mp4" "$ROOT/android/app/src/main/assets/demo.mp4"
 fi
 du -sh "$OUT"/* | sed "s|$OUT/||"
+
+# Test-only UI fixture: never packaged in the release APK.
+mkdir -p android/app/src/androidTest/assets
+npx esbuild tools/artwork-fixture.js --bundle --format=iife --target=chrome69 --outfile=android/app/src/androidTest/assets/artwork-ui.js

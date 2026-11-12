@@ -9,7 +9,7 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args): pass
     def do_GET(self):
         path = self.path.split('?', 1)[0]
-        if path in ['/artwork.png', '/thumb-ok']:
+        if path in ['/image', '/redirect']:
             body = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAgAAAAICAIAAABLbSncAAAAEUlEQVR4nGOwqdiCFTEMLQkADNVaAaRyP9sAAAAASUVORK5CYII=')
             self.send_response(200); self.send_header('Content-Type', 'image/png'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
             return
@@ -18,7 +18,7 @@ class Quiet(http.server.SimpleHTTPRequestHandler):
         super().do_GET()
 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Quiet, directory=str(ROOT / 'build/web')))
 threading.Thread(target=server.serve_forever, daemon=True).start()
-seed = {'active':'demo','favs':{'live':['d1'],'movie':['f3'],'series':[]},'settings':{'autoplayLast':False,'autoPreview':False,'preview':False,'lockAdult':False,'lite':True,'motion':False,'torrentSource':'https://source.test','torrentSourceName':'Test provider'}}
+seed = {'active':'demo','favs':{'live':['d1'],'movie':['f3'],'series':[]},'settings':{'autoplayLast':False,'autoPreview':False,'preview':False,'lockAdult':True,'lite':True,'motion':False,'torrentSource':'https://source.test','torrentSourceName':'Test provider'}}
 meta = {'id':'tt100','name':'Test Harbour','type':'movie','releaseInfo':'2025'}
 errors = []
 try:
@@ -71,30 +71,22 @@ try:
     out = ROOT / 'build/navigation-shots'
     out.mkdir(parents=True,exist_ok=True)
     page.screenshot(path=str(out/'debrid-settings.png'))
-    # Exercise the native thumbnail URL path in a real browser, not just direct
-    # browser posters: failed proxy -> real original pixels, with bounded retry.
-    fixture = subprocess.run([str(ROOT/'node_modules/.bin/esbuild'), '--bundle', '--format=iife', '--target=chrome69'], input="""
-      import {poster,logo,artworkImage} from './web/src/ui.js';
-      const src=location.origin+'/artwork.png';
-      document.querySelector('#fixture').innerHTML=
-        '<div id="poster-case" style="width:220px">'+poster({name:'Poster photo',img:src})+'</div>'+
-        '<div id="logo-case">'+logo({name:'Logo',logo:src})+'</div>'+
-        '<div id="banner-case">'+artworkImage(src,960,'banner')+'</div>'+
-        '<div id="missing-case" style="width:220px">'+poster({name:'Unavailable artwork',img:location.origin+'/missing-artwork.png'})+'</div>';
-      window.__thumbBase='/thumb-ok?';
-      document.querySelector('#fixture').insertAdjacentHTML('beforeend','<div id="cached-case" style="width:220px">'+poster({name:'Cached photo',img:location.origin+'/never-needed.png'})+'</div>');
-    """, text=True, capture_output=True, cwd=ROOT, check=True).stdout
-    (ROOT/'build/web/artwork-fixture.html').write_text('<!doctype html><link rel="stylesheet" href="app.css"><div id="fixture"></div><script>window.Native={};window.__thumbBase="/thumb-fail?";</script><script>'+fixture+'</script>')
+    # Exercise data-URI decoding and the actual shared UI fixture. Android CI also
+    # runs this same fixture against NativeBridge, without a mocked image service.
+    fixture = subprocess.run([str(ROOT/'node_modules/.bin/esbuild'), 'tools/artwork-fixture.js', '--bundle', '--format=iife', '--target=chrome69'], text=True, capture_output=True, cwd=ROOT, check=True).stdout
+    # Use a valid JPEG supplied by the test server via the same transparent bridge protocol.
+    native_mock = """
+      window.__imageBase=location.origin;
+      const bodies=new Map();
+      window.Native={cacheRead:()=>null, take:id=>{const b=bodies.get(id);bodies.delete(id);return b;},
+        artwork:(id,url,w)=>fetch(url).then(r=>{if(!r.ok)throw Error();return r.blob()}).then(blob=>new Promise(resolve=>{const img=new Image();img.onload=()=>{const c=document.createElement('canvas');c.width=img.width;c.height=img.height;c.getContext('2d').drawImage(img,0,0);URL.revokeObjectURL(img.src);resolve(c.toDataURL('image/jpeg'));};img.src=URL.createObjectURL(blob);})).then(data=>{bodies.set(id,data);window.__nat('artwork',{id,ok:true});},()=>window.__nat('artwork',{id,ok:false,error:'Unavailable'}))};
+    """
+    (ROOT/'build/web/artwork-fixture.html').write_text('<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="app.css"><body><script>'+native_mock+'</script><script>'+fixture+'</script>')
     page.goto(f'http://127.0.0.1:{server.server_port}/artwork-fixture.html')
-    page.wait_for_function("['poster-case','logo-case','banner-case','cached-case'].every(id=>{const i=document.querySelector('#'+id+' img');return i&&i.complete&&i.naturalWidth>0})")
-    for case in ['poster-case','logo-case','banner-case']:
-        assert page.locator('#'+case+' img').get_attribute('data-image-retry') == '1'
-    assert page.locator('#cached-case img').get_attribute('data-image-retry') is None
-    page.wait_for_function("!document.querySelector('#missing-case img')")
-    assert 'Unavailable artwork' in page.locator('#missing-case').inner_text()
+    page.wait_for_function('window.__imageResult && __imageResult().loaded && __imageResult().native && __imageResult().missing')
     assert not errors, errors
-    page.screenshot(path=str(out/'thumbnail-fallback.png'))
+    page.screenshot(path=str(out/'native-artwork.png'))
     browser.close()
-    print('PASS: existing screens, D-pad focus, source selection, Back/tab restoration, actual image decoding after native proxy failure; no JavaScript errors.')
+    print('PASS: existing screens, D-pad focus, source selection, Back/tab restoration, actual image decoding through the artwork bridge; no JavaScript errors.')
 finally:
  server.shutdown()

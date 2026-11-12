@@ -206,7 +206,7 @@ export class SettingsScreen {
       ${this.row('Internet torrent search', this.toggle(setting('internetTorrents') !== false), 'internet-torrents', '', 'Torrentio searches multiple public torrent indexes. No Debrid login is used for this search.')}
       ${this.row('Additional source add-on', esc(setting('torrentSourceName') || 'Optional'), 'torrent-source', '', 'Search an additional Stremio-compatible provider alongside internet torrents.')}
       ${this.row('Preferred quality', (setting('torrentQuality') || 1080) + 'p', 'torrent-quality', '', 'Internet results first, then preferred quality and seed count.')}
-      <div class="st-note"><p>Your Debrid API keys are not sent to Torrentio. Cached-only filters from an additional add-on do not restrict internet search. Uncached torrents may need preparation in your Debrid account before they play.</p><p>When parental control is enabled, opening the Torrents tab requires your PIN because online titles are outside your IPTV categories.</p></div>`;
+      <div class="st-note"><p>Your Debrid API keys are not sent to Torrentio. Cached-only filters from an additional add-on do not restrict internet search. Uncached torrents may need preparation in your Debrid account before they play.</p><p>Torrent browsing opens without a PIN.</p></div>`;
   }
 
   subs() {

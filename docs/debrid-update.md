@@ -38,10 +38,13 @@ An earlier candidate was 1,382,600 bytes versus 1,373,363 bytes for build 36. No
 
 The release workflow publishes only main-branch builds after all checks pass. The original uploaded APK remains unchanged. The same app ID and certificate allow the installed application's updater to install the newer version in place.
 
-## Internet torrent search (build 44)
 
-Internet torrent search is enabled by default through Torrentio, independently of saved Debrid accounts. A configured Stremio add-on is now additional and cannot restrict the built-in search to cloud-only or cached-only results. Internet results are labelled and ranked first, followed by preferred quality and seed count. Up to 150 ranked sources are displayed; ranking precedes the display limit. Provider outages are shown explicitly and failed partial responses are not cached.
+### Artwork bridge and Torrent PIN removal
 
-Debrid still resolves the selected raw torrent for playback/download using the existing player and download settings. Uncached torrents may need cloud preparation. This is search across supported public torrent indexes, not a crawler of every website on the internet.
+Torrent browsing and source details open without a PIN, including when IPTV parental controls are enabled. IPTV parental settings are preserved.
 
-Validation: 26 service/DOM tests pass; browser tests cover independent internet and additional sources plus previous navigation and thumbnail recovery. The live unconfigured internet provider returned raw torrent hashes for a public-domain test film without any Debrid credentials.
+The interface no longer requests the synthetic thumbnail hostname. Android downloads and resizes artwork off the UI thread and delivers JPEG data directly through its JavaScript bridge, with at most three image requests active. Images near the visible area load first. A fresh artwork cache bypasses old failed entries; direct original URLs remain a bounded fallback. Posters, channel logos and home banners share the same path.
+
+Debrid review fixes explicit episode mismatches, missing AllDebrid file links, reconnect messages for invalid keys, and stale Back-navigation playback. Internet torrent discovery remains separate from account credentials. Both providers' API flows, cloud preparation, key errors and cancellation are covered by deterministic tests; subscribed live playback on the user's TV cannot be exercised here.
+
+Release gates now include the shared artwork UI fixture in a real Android WebView. The test downloads a PNG from an isolated HTTP fixture, follows a redirect, decodes Android's returned JPEG data in WebView, repairs a corrupt image cache, and retains a title when artwork is unavailable. Test dependencies and fixtures are excluded from the release APK.

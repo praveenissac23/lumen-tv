@@ -6,7 +6,7 @@ const esbuild = require('esbuild');
 const bundle = esbuild.buildSync({ stdin: { contents: `import * as ui from './web/src/ui.js'; import * as torrents from './web/src/torrents.js'; import * as store from './web/src/store.js'; import {SearchScreen} from './web/src/screens/searchview.js'; import {TorrentDetailScreen} from './web/src/screens/torrentdetail.js'; import {SettingsScreen} from './web/src/screens/settings.js'; window.testAPI={ui,torrents,store,SearchScreen,TorrentDetailScreen,SettingsScreen};`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
 const windows = [];
 const runtimeErrors = [];
-function setup(handler = async () => ({}), seed = {}) {
+function setup(handler = async () => ({}), seed = {}, imageHandler) {
   const dom = new JSDOM('<!doctype html><div id="stage"><div id="view"></div><div id="overlays"></div><div id="toast"></div></div>', { url: 'https://lumen.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   dom.window.addEventListener('error',e=>{runtimeErrors.push(String(e.error)); e.preventDefault();});
   const w = dom.window, disk = new Map([['state', JSON.stringify(seed)]]), bodies = new Map(), calls = [];
@@ -15,6 +15,10 @@ function setup(handler = async () => ({}), seed = {}) {
     http: (id, url) => { calls.push({url,method:'GET'}); Promise.resolve().then(() => handler(url,'GET')).then(r => { bodies.set(id, JSON.stringify(r)); w.__nat('http',{id,ok:true}); }, () => w.__nat('http',{id,ok:false,error:'offline'})); },
     call: (id, method, url, headers, body) => { calls.push({url,method,headers:JSON.parse(headers),body}); Promise.resolve().then(() => handler(url,method,body)).then(r => { bodies.set(id,typeof r === 'string' ? r : JSON.stringify(r)); w.__nat('call',{id,ok:true}); }, () => w.__nat('call',{id,ok:false,error:'offline'})); },
     take: id => { const r=bodies.get(id); bodies.delete(id); return r; }, apps: () => JSON.stringify([{pkg:'org.videolan.vlc',name:'VLC',role:'player'},{pkg:'com.mxtech.videoplayer.ad',name:'MX Player',role:'player'},{pkg:'idm.internet.download.manager',name:'1DM',role:'download'},{pkg:'com.dv.adm',name:'ADM',role:'download'}]), openWith:(pkg,url,options)=>{calls.push({handoff:true,pkg,url,options:JSON.parse(options)});return true;},
+  };
+  if (imageHandler) w.Native.artwork = (id,url,width) => {
+    calls.push({artwork:true,url,width});
+    Promise.resolve().then(()=>imageHandler(url,width)).then(src=>{bodies.set(id,src);w.__nat('artwork',{id,ok:true});},()=>w.__nat('artwork',{id,ok:false,error:'unavailable'}));
   };
   w.eval(bundle); windows.push(w);
   const api = w.testAPI;
@@ -120,12 +124,13 @@ test('leaving search cancels pending timers and late results do not touch detach
  const s=new x.SearchScreen(x.view,{q:'test'},x.app); s.destroy(); x.view.innerHTML='Other screen';
  await delay(500); assert.equal(x.view.textContent,'Other screen'); assert.equal(x.calls.length,0);
 });
-test('parental control requires PIN before online tab opens',async()=>{
- const x=setup(async()=>({metas:[]}),{pin:'1234',settings:{lockAdult:true}});
- const s=new x.SearchScreen(x.view,{},x.app); const p=s.switchTab('torrents');
- assert.equal(s.tab,'lumen'); assert.ok(x.w.document.querySelector('.pin'));
- x.w.document.querySelector('.pin-key[data-k="1"]').click(); x.w.document.querySelector('.pin-key[data-k="2"]').click(); x.w.document.querySelector('.pin-key[data-k="3"]').click(); x.w.document.querySelector('.pin-key[data-k="4"]').click();
- await delay(150); await p; assert.equal(s.tab,'torrents'); s.destroy();
+test('torrents tab and direct detail open without PIN while IPTV parental settings stay intact',async()=>{
+ const x=setup(async()=>({streams:[]}),{pin:'1234',settings:{lockAdult:true}});
+ const s=new x.SearchScreen(x.view,{},x.app); await s.switchTab('torrents');
+ assert.equal(s.tab,'torrents'); assert.equal(x.w.document.querySelector('.pin'),null); s.destroy();
+ const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Test'}},x.app);
+ await delay(20); assert.equal(x.w.document.querySelector('.pin'),null); assert.ok(x.calls.some(c=>c.url.includes('/stream/movie/')));
+ assert.equal(x.store.setting('lockAdult'),true); assert.equal(x.store.S.pin,'1234'); d.destroy();
 });
 test('explicitly disabled internet search keeps detail usable with a path to settings',async()=>{
  const x=setup(undefined,{settings:{lockAdult:false,internetTorrents:false}}); const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Test'}},x.app);
@@ -158,25 +163,63 @@ test('series source uses the series player setting and restores episode choice',
 });
 test('invalid API response is surfaced and cannot launch a player',async()=>{
  const x=setup(async()=>({error:'bad_token'})); x.torrents.saveAccount('rd','INVALID');
- await assert.rejects(()=>x.torrents.resolveSource({hash:'e'.repeat(40)},'rd',null,()=>{}),/could not complete/);
+ await assert.rejects(()=>x.torrents.resolveSource({hash:'e'.repeat(40)},'rd',null,()=>{}),/key is invalid or expired/);
  assert.equal(x.calls.filter(c=>c.handoff).length,0);
 });
 
-test('native thumbnail failure retries the original poster exactly once',()=>{
- const x=setup();
- x.view.innerHTML=x.ui.poster({name:'Real poster',img:'https://images.test/poster.jpg'});
- const img=x.view.querySelector('img'); assert.match(img.src,/thumb.lumen/);
- x.w.__lumenImageError(img);
- assert.equal(img.src,'https://images.test/poster.jpg'); assert.equal(img.dataset.imageRetry,'1'); assert.ok(img.isConnected);
+test('older bridges use original image URLs without the failing thumbnail hostname',()=>{
+ const x=setup(); x.view.innerHTML=x.ui.poster({name:'Real poster',img:'https://images.test/poster.jpg'});
+ const img=x.view.querySelector('img'); assert.equal(img.src,'https://images.test/poster.jpg');
  x.w.__lumenImageError(img); assert.equal(x.view.querySelector('img'),null); assert.match(x.view.textContent,/Real poster/);
-});
-test('fallback keeps TMDB images small and supports channel logos and banner artwork',()=>{
- const x=setup();
  assert.equal(x.ui.directImageUrl('https://image.tmdb.org/t/p/original/p.jpg',320),'https://image.tmdb.org/t/p/w342/p.jpg');
- x.view.innerHTML=x.ui.logo({name:'Channel',logo:'https://logos.test/logo.png'});
- let img=x.view.querySelector('img'); x.w.__lumenImageError(img); assert.equal(img.src,'https://logos.test/logo.png');
- x.view.innerHTML=x.ui.artworkImage('https://images.test/banner.jpg?x=1&y=2',960,'bb-wide');
- img=x.view.querySelector('img'); x.w.__lumenImageError(img); assert.equal(img.className,'bb-wide'); assert.equal(img.src,'https://images.test/banner.jpg?x=1&y=2');
+ assert.equal(x.ui.directImageUrl('//images.test/p.jpg',320),'https://images.test/p.jpg');
+});
+test('new native artwork route sends JPEG data to posters, logos and banners, deduplicating requests',async()=>{
+ const data='data:image/jpeg;base64,TEST'; const x=setup(undefined,{},async()=>{await delay(10);return data;});
+ x.view.innerHTML=x.ui.poster({name:'Film',img:'https://images.test/p.jpg'})+x.ui.artworkImage('https://images.test/p.jpg',320,'duplicate')+x.ui.logo({name:'Channel',logo:'https://images.test/logo.png'});
+ for(const img of x.view.querySelectorAll('img')) x.w.__lumenLoadImage(img);
+ await delay(30);
+ assert.equal(x.calls.filter(c=>c.artwork).length,2);
+ for(const img of x.view.querySelectorAll('img')) {assert.equal(img.src,data);img.onload();assert.equal(img.dataset.artworkState,'loaded');}
+});
+test('native artwork failures use direct images once and limit concurrency to three',async()=>{
+ let active=0,max=0;
+ const x=setup(undefined,{},async()=>{max=Math.max(max,++active);await delay(10);--active;throw Error('offline');});
+ x.view.innerHTML=Array.from({length:8},(_,i)=>x.ui.artworkImage('https://images.test/'+i+'.jpg',320)).join('');
+ for(const img of x.view.querySelectorAll('img')) x.w.__lumenLoadImage(img);
+ await delay(80); assert.equal(max,3);
+ for(const img of [...x.view.querySelectorAll('img')]) {assert.equal(img.src,img.dataset.original);x.w.__lumenImageError(img);}
+ assert.equal(x.view.querySelectorAll('img').length,0);
+});
+test('detached images are never populated by late artwork responses',async()=>{
+ const x=setup(undefined,{},async()=>{await delay(15);return 'data:image/jpeg;base64,TEST';});
+ x.view.innerHTML=x.ui.artworkImage('https://images.test/a.jpg',320);const img=x.view.querySelector('img'); x.w.__lumenLoadImage(img);img.remove();
+ await delay(30);assert.match(img.src,/svg/);
+});
+test('wrong explicit episode cannot override requested episode through a file index',async()=>{
+ const {torrents:t}=setup();const files=[{name:'Show.S01E01.mkv'},{name:'Show.S01E02.mkv'}];
+ assert.equal((await t.chooseVideo(files,{fileIdx:0},{season:1,episode:2},()=>assert.fail())).name,'Show.S01E02.mkv');
+ await assert.rejects(()=>t.chooseVideo(files.slice(0,1),{fileIdx:0},{season:1,episode:2},()=>assert.fail()),/requested episode was not found/);
+});
+for(const [provider,response] of [['rd',{error:'bad',error_code:8}],['ad',{status:'error',error:{code:'AUTH_BAD_APIKEY'}}]]) {
+ test(provider+' expired key gives a safe reconnect message',async()=>{
+  const x=setup(async()=>response);x.torrents.saveAccount(provider,'PRIVATE_KEY');
+  await assert.rejects(()=>x.torrents.resolveSource({hash:'e'.repeat(40)},provider,null,()=>{}),e=>/Reconnect/.test(e.message)&&!e.message.includes('PRIVATE_KEY'));
+ });
+}
+test('AllDebrid preparing jobs are reused and do not return playback links',async()=>{
+ let uploads=0;const x=setup(async(url)=>url.endsWith('/upload')?(++uploads,{status:'success',data:{magnets:[{id:8}]}}):{status:'success',data:{magnets:{id:8,statusCode:1}}});x.torrents.saveAccount('ad','TEST');
+ for(let i=0;i<2;i++)await assert.rejects(()=>x.torrents.resolveSource({hash:'f'.repeat(40)},'ad',null,()=>{}),/Preparing in AllDebrid/);
+ assert.equal(uploads,1);
+});
+test('Back during a Debrid request prevents late player handoff and permits next episode',async()=>{
+ let release;
+ const x=setup(async(url)=>url.includes('/meta/')?{meta:{videos:[{id:'tt1:1:1',season:1,episode:1}]}}:url.includes('/stream/')?{streams:[{infoHash:'a'.repeat(40)}]}:url.endsWith('/addMagnet')?{id:'1'}:new Promise(r=>{release=r;}),{settings:{playerSeries:'org.videolan.vlc'}});
+ x.torrents.saveAccount('rd','TEST');const episode={id:'tt1:1:1',season:1,episode:1};
+ const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'series',name:'Series'},restore:{episode}},x.app);
+ await delay(20);const pending=d.launch(false);await delay(10);d.onKey('back');assert.equal(d.busy,false);
+ release({status:'downloaded',files:[{id:1,path:'Show.S01E01.mkv',selected:1}],links:['https://rd/file']});await pending;
+ assert.equal(x.calls.filter(c=>c.handoff).length,0);assert.equal(d.phase,'episodes');d.destroy();
 });
 
 test('internet torrent indexes are searched without a Debrid account or custom add-on',async()=>{

@@ -1,6 +1,6 @@
 // Shared UI pieces: icons, artwork, toast, dialogs, virtual list.
 import { esc, el, initials, tint, $, hhmm } from './util.js';
-import { isNative } from './native.js';
+import { artwork, hasArtworkBridge } from './native.js';
 import { C, nowNext } from './data.js';
 import { pushLayer, popLayer, focus, focusFirst, focusables } from './nav.js';
 
@@ -51,31 +51,69 @@ export const icon = (name, cls = '') =>
   `<svg class="ic ${cls}" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round" aria-hidden="true">${P[name] || ''}</svg>`;
 
 // ---------- artwork ----------
-// On the TV, images go through the native thumbnail service (small JPEGs, cached on disk).
-export function imgUrl(url, w) {
-  if (!url) return '';
-  return isNative ? `${window.__thumbBase || 'https://thumb.lumen/?'}w=${w}&u=${encodeURIComponent(url)}` : url;
-}
-// A failed native thumbnail must not erase an otherwise available poster/logo.
+// Native images arrive as resized JPEG bytes, without WebView network interception.
+export function imgUrl(url, w) { return directImageUrl(url, w); }
 export function directImageUrl(url, w) {
   if (!url) return '';
-  const src = String(url).trim();
+  const src = String(url).trim().replace(/^\/\//, 'https://');
   if (!src.includes('image.tmdb.org/t/p/')) return src;
   const size = w <= 185 ? 'w185' : w <= 342 ? 'w342' : w <= 500 ? 'w500' : 'w780';
   return src.replace(/\/t\/p\/[^/]+\//, `/t/p/${size}/`);
 }
+const imageQueue = [], imageJobs = new Map();
+let imageActive = 0;
+function drainImages() {
+  while (imageActive < 3 && imageQueue.length) {
+    const job = imageQueue.shift(); ++imageActive;
+    Promise.resolve().then(() => artwork(job.url, job.w)).then((src) => {
+      if (!/^data:image\/jpeg;base64,/.test(src || '')) throw new Error('Invalid artwork');
+      return src;
+    }).catch(() => directImageUrl(job.url, job.w)).then(job.resolve).finally(() => {
+      imageJobs.delete(job.key); --imageActive; drainImages();
+    });
+  }
+}
+export function resolveArtwork(url, w) {
+  if (!hasArtworkBridge) return Promise.resolve(directImageUrl(url, w));
+  const key = w + ':' + url;
+  if (!imageJobs.has(key)) {
+    const promise = new Promise((resolve) => imageQueue.push({ url, w, key, resolve }));
+    imageJobs.set(key, promise); drainImages();
+  }
+  return imageJobs.get(key);
+}
+function loadImage(image) {
+  if (!image.isConnected || image.dataset.artworkState !== 'waiting') return;
+  image.dataset.artworkState = 'loading';
+  resolveArtwork(image.dataset.original, +image.dataset.artworkWidth).then((src) => {
+    if (!image.isConnected) return;
+    image.onload = () => { image.dataset.artworkState = 'loaded'; };
+    image.src = src;
+  });
+}
+const observedImages = new Set();
+const imageObserver = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver((entries) => {
+  for (const entry of entries) if (entry.isIntersecting) { imageObserver.unobserve(entry.target); observedImages.delete(entry.target); loadImage(entry.target); }
+}, { rootMargin: '300px' }) : null;
+window.__lumenLoadImage = (image) => {
+  if (imageObserver) { observedImages.add(image); imageObserver.observe(image); } else loadImage(image);
+};
+if (imageObserver) new MutationObserver(() => {
+  for (const image of observedImages) if (!image.isConnected) { imageObserver.unobserve(image); observedImages.delete(image); }
+}).observe(document.documentElement, { childList: true, subtree: true });
 window.__lumenImageError = (image) => {
   const original = image.dataset.original;
   if (original && image.dataset.imageRetry !== '1' && image.getAttribute('src') !== original) {
-    image.dataset.imageRetry = '1';
-    image.src = original;
-    return;
+    image.dataset.imageRetry = '1'; image.src = original; return;
   }
-  image.remove(); // Both routes failed; retain the existing title/monogram underneath.
+  image.dataset.artworkState = 'failed'; image.remove();
 };
+// A tiny SVG only bootstraps the asynchronous bridge; it is never treated as artwork.
+const imagePlaceholder = 'data:image/svg+xml,%3Csvg xmlns="http://www.w3.org/2000/svg" width="1" height="1"/%3E';
 export function artworkImage(url, w, cls = '') {
   if (!url) return '';
-  return `<img class="${esc(cls)}" decoding="async" src="${esc(imgUrl(url, w))}" data-original="${esc(directImageUrl(url, w))}" alt="" onerror="window.__lumenImageError(this)">`;
+  const native = hasArtworkBridge;
+  return `<img class="${esc(cls)}" decoding="async" src="${esc(native ? imagePlaceholder : directImageUrl(url, w))}" data-original="${esc(directImageUrl(url, w))}" data-artwork-width="${w}" data-artwork-state="${native ? 'waiting' : 'loading'}" alt="" onload="${native ? 'this.onload=null;window.__lumenLoadImage(this)' : "this.dataset.artworkState='loaded'"}" onerror="window.__lumenImageError(this)">`;
 }
 // Channel logo with a monogram fallback; real logos load lazily and replace it.
 export function logo(ch, size = '') {

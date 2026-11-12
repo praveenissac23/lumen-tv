@@ -14,10 +14,10 @@ import java.util.concurrent.Semaphore
  * Providers often ship 2000-pixel posters; decoding dozens of those at once is what
  * runs a TV stick out of memory. Here each image is downscaled once and cached on disk.
  *
- * The page asks for  https://thumb.lumen/?w=320&u=<encoded original url>
+ * NativeBridge delivers the resized bytes directly to the page as a JPEG data URI.
  */
 class Thumbs(ctx: Context) {
-    private val dir = File(ctx.cacheDir, "thumbs").apply { mkdirs() }
+    private val dir = File(ctx.cacheDir, "artwork-v3").apply { mkdirs() }
     private val gate = Semaphore(8)       // parallel downloads (network-bound; decoding is quick at these sizes)
     // Recently served images kept in memory, so revisiting a screen shows them at once.
     private val mem = object : android.util.LruCache<String, ByteArray>(12 * 1024 * 1024) {
