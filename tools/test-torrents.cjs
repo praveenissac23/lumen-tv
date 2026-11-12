@@ -3,7 +3,7 @@ const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
 const esbuild = require('esbuild');
-const bundle = esbuild.buildSync({ stdin: { contents: `import * as torrents from './web/src/torrents.js'; import * as store from './web/src/store.js'; import {SearchScreen} from './web/src/screens/searchview.js'; import {TorrentDetailScreen} from './web/src/screens/torrentdetail.js'; import {SettingsScreen} from './web/src/screens/settings.js'; window.testAPI={torrents,store,SearchScreen,TorrentDetailScreen,SettingsScreen};`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
+const bundle = esbuild.buildSync({ stdin: { contents: `import * as ui from './web/src/ui.js'; import * as torrents from './web/src/torrents.js'; import * as store from './web/src/store.js'; import {SearchScreen} from './web/src/screens/searchview.js'; import {TorrentDetailScreen} from './web/src/screens/torrentdetail.js'; import {SettingsScreen} from './web/src/screens/settings.js'; window.testAPI={ui,torrents,store,SearchScreen,TorrentDetailScreen,SettingsScreen};`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
 const windows = [];
 const runtimeErrors = [];
 function setup(handler = async () => ({}), seed = {}) {
@@ -160,4 +160,21 @@ test('invalid API response is surfaced and cannot launch a player',async()=>{
  const x=setup(async()=>({error:'bad_token'})); x.torrents.saveAccount('rd','INVALID');
  await assert.rejects(()=>x.torrents.resolveSource({hash:'e'.repeat(40)},'rd',null,()=>{}),/could not complete/);
  assert.equal(x.calls.filter(c=>c.handoff).length,0);
+});
+
+test('native thumbnail failure retries the original poster exactly once',()=>{
+ const x=setup();
+ x.view.innerHTML=x.ui.poster({name:'Real poster',img:'https://images.test/poster.jpg'});
+ const img=x.view.querySelector('img'); assert.match(img.src,/thumb.lumen/);
+ x.w.__lumenImageError(img);
+ assert.equal(img.src,'https://images.test/poster.jpg'); assert.equal(img.dataset.imageRetry,'1'); assert.ok(img.isConnected);
+ x.w.__lumenImageError(img); assert.equal(x.view.querySelector('img'),null); assert.match(x.view.textContent,/Real poster/);
+});
+test('fallback keeps TMDB images small and supports channel logos and banner artwork',()=>{
+ const x=setup();
+ assert.equal(x.ui.directImageUrl('https://image.tmdb.org/t/p/original/p.jpg',320),'https://image.tmdb.org/t/p/w342/p.jpg');
+ x.view.innerHTML=x.ui.logo({name:'Channel',logo:'https://logos.test/logo.png'});
+ let img=x.view.querySelector('img'); x.w.__lumenImageError(img); assert.equal(img.src,'https://logos.test/logo.png');
+ x.view.innerHTML=x.ui.artworkImage('https://images.test/banner.jpg?x=1&y=2',960,'bb-wide');
+ img=x.view.querySelector('img'); x.w.__lumenImageError(img); assert.equal(img.className,'bb-wide'); assert.equal(img.src,'https://images.test/banner.jpg?x=1&y=2');
 });

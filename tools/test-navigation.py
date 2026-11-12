@@ -1,12 +1,21 @@
 """Real Chromium regression gate for the TV shell. Run after npm run build.
 No accounts, IPTV subscription or public media downloads are required.
 """
-import functools, http.server, json, os, threading
+import base64, functools, http.server, json, os, subprocess, threading
 from pathlib import Path
 from playwright.sync_api import sync_playwright
 ROOT = Path(__file__).resolve().parents[1]
 class Quiet(http.server.SimpleHTTPRequestHandler):
     def log_message(self, *args): pass
+    def do_GET(self):
+        path = self.path.split('?', 1)[0]
+        if path in ['/artwork.png', '/thumb-ok']:
+            body = base64.b64decode('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aZ1cAAAAASUVORK5CYII=')
+            self.send_response(200); self.send_header('Content-Type', 'image/png'); self.send_header('Content-Length',str(len(body))); self.end_headers(); self.wfile.write(body)
+            return
+        if path == '/thumb-fail':
+            self.send_error(404); return
+        super().do_GET()
 server = http.server.ThreadingHTTPServer(('127.0.0.1', 0), functools.partial(Quiet, directory=str(ROOT / 'build/web')))
 threading.Thread(target=server.serve_forever, daemon=True).start()
 seed = {'active':'demo','favs':{'live':['d1'],'movie':['f3'],'series':[]},'settings':{'autoplayLast':False,'autoPreview':False,'preview':False,'lockAdult':False,'lite':True,'motion':False,'torrentSource':'https://source.test','torrentSourceName':'Test provider'}}
@@ -59,7 +68,30 @@ try:
     out = ROOT / 'build/navigation-shots'
     out.mkdir(parents=True,exist_ok=True)
     page.screenshot(path=str(out/'debrid-settings.png'))
+    # Exercise the native thumbnail URL path in a real browser, not just direct
+    # browser posters: failed proxy -> real original pixels, with bounded retry.
+    fixture = subprocess.run([str(ROOT/'node_modules/.bin/esbuild'), '--bundle', '--format=iife', '--target=chrome69'], input="""
+      import {poster,logo,artworkImage} from './web/src/ui.js';
+      const src=location.origin+'/artwork.png';
+      document.querySelector('#fixture').innerHTML=
+        '<div id="poster-case" style="width:220px">'+poster({name:'Poster photo',img:src})+'</div>'+
+        '<div id="logo-case">'+logo({name:'Logo',logo:src})+'</div>'+
+        '<div id="banner-case">'+artworkImage(src,960,'banner')+'</div>'+
+        '<div id="missing-case" style="width:220px">'+poster({name:'Unavailable artwork',img:location.origin+'/missing-artwork.png'})+'</div>';
+      window.__thumbBase='/thumb-ok?';
+      document.querySelector('#fixture').insertAdjacentHTML('beforeend','<div id="cached-case" style="width:220px">'+poster({name:'Cached photo',img:location.origin+'/never-needed.png'})+'</div>');
+    """, text=True, capture_output=True, cwd=ROOT, check=True).stdout
+    (ROOT/'build/web/artwork-fixture.html').write_text('<!doctype html><link rel="stylesheet" href="app.css"><div id="fixture"></div><script>window.Native={};window.__thumbBase="/thumb-fail?";</script><script>'+fixture+'</script>')
+    page.goto(f'http://127.0.0.1:{server.server_port}/artwork-fixture.html')
+    page.wait_for_function("['poster-case','logo-case','banner-case','cached-case'].every(id=>{const i=document.querySelector('#'+id+' img');return i&&i.complete&&i.naturalWidth>0})")
+    for case in ['poster-case','logo-case','banner-case']:
+        assert page.locator('#'+case+' img').get_attribute('data-image-retry') == '1'
+    assert page.locator('#cached-case img').get_attribute('data-image-retry') is None
+    page.wait_for_function("!document.querySelector('#missing-case img')")
+    assert 'Unavailable artwork' in page.locator('#missing-case').inner_text()
+    assert not errors, errors
+    page.screenshot(path=str(out/'thumbnail-fallback.png'))
     browser.close()
-    print('PASS: existing screens, D-pad focus, source selection, Back/tab restoration; no JavaScript errors.')
+    print('PASS: existing screens, D-pad focus, source selection, Back/tab restoration, actual image decoding after native proxy failure; no JavaScript errors.')
 finally:
  server.shutdown()

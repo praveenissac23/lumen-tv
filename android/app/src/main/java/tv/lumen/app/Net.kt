@@ -15,7 +15,7 @@ import java.util.zip.GZIPInputStream
 /** Plain HTTP helpers: redirects across http/https, gzip, IPTV-friendly user agent. */
 object Net {
 
-    fun open(url: String, timeoutMs: Int): Pair<HttpURLConnection, InputStream> {
+    fun open(url: String, timeoutMs: Int, requestHeaders: Map<String, String> = emptyMap()): Pair<HttpURLConnection, InputStream> {
         var target = url
         repeat(6) {
             val c = URL(target).openConnection() as HttpURLConnection
@@ -29,6 +29,7 @@ object Net {
                 c.setRequestProperty("Cookie", "CONSENT=YES+1; SOCS=CAI")
             } else c.setRequestProperty("User-Agent", PlayerHost.USER_AGENT)
             c.setRequestProperty("Accept-Encoding", "gzip")
+            for ((name, value) in requestHeaders) c.setRequestProperty(name, value)
             val code = c.responseCode
             if (code in 300..399) {
                 val loc = c.getHeaderField("Location") ?: throw IllegalStateException("Redirect without a location")

@@ -6,7 +6,7 @@ import { itemActions } from '../actions.js';
 import { update, installUpdate } from '../updates.js';
 import { esc, hhmm, now, minutesLeft, tint } from '../util.js';
 import { focus, reveal } from '../nav.js';
-import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots, imgUrl } from '../ui.js';
+import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots, imgUrl, artworkImage, directImageUrl } from '../ui.js';
 import { prefetchNow, hasProgs } from '../epg.js';
 import { preview, stopPreview, playLive, playVod, playCatchup } from '../player.js';
 import { movieUrl, episodeUrl, seriesInfo } from '../data.js';
@@ -421,7 +421,7 @@ export class HomeScreen {
       meta = bits.join('<i class="bb-dot"></i>');
       if (kind === 'cont' && it.dur > 0) extra = `<div class="bb-time">${progressBar(it.pos / it.dur)}<span>${Math.max(1, Math.round((it.dur - it.pos) / 60000))} min left</span></div>`;
       extra += `<p class="bb-plot" id="bb-plot">${esc(it.plot || '')}</p>`;
-      art = img ? `<img class="bb-blur" src="${esc(imgUrl(img, 64))}" alt="" onerror="this.remove()"><img class="bb-poster" src="${esc(imgUrl(img, 320))}" alt="" onerror="this.remove()">` : '';
+      art = img ? artworkImage(img, 64, 'bb-blur') + artworkImage(img, 320, 'bb-poster') : '';
     }
     box.innerHTML = `<div class="bb-in"><p class="bb-kicker">${kicker}</p><h1 class="bb-title${title.length > 28 ? ' long' : ''}">${title}</h1><div class="bb-meta">${meta}</div>${extra}</div>`;
     bg.innerHTML = art ? `<div class="bb-art${img ? ' has-img' : ''}">${art}</div>` : '';
@@ -433,7 +433,7 @@ export class HomeScreen {
           const p = this.view.querySelector('#bb-plot'); if (p && inf.plot && !it.plot) p.textContent = inf.plot;
           if (inf.backdrop) {
             const a = this.view.querySelector('#bb-bg .bb-art');
-            if (a) { const im = new Image(); im.className = 'bb-wide'; im.alt = ''; im.onload = () => { if (this.bbKey === key) { a.appendChild(im); a.classList.add('wide'); } }; im.src = imgUrl(inf.backdrop, 960); }
+            if (a) { const im = new Image(); im.className = 'bb-wide'; im.alt = ''; im.dataset.original = directImageUrl(inf.backdrop, 960); im.onerror = () => window.__lumenImageError(im); im.onload = () => { if (this.bbKey === key) { a.appendChild(im); a.classList.add('wide'); } }; im.src = imgUrl(inf.backdrop, 960); }
           }
         }).catch(() => {});
       }, 450);

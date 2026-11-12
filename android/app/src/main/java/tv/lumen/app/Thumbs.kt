@@ -41,16 +41,13 @@ class Thumbs(ctx: Context) {
         val w = width.coerceIn(48, 1280)
         val key = Integer.toHexString(src.hashCode()) + "_" + w + "_" + Integer.toHexString(src.length)
         mem.get(key)?.let { return ok(it) }
-        failed[src]?.let { if (System.currentTimeMillis() - it < 30 * 60 * 1000) return notFound() }
+        failed[src]?.let { if (System.currentTimeMillis() - it < 30 * 1000) return notFound() else failed.remove(src) }
         val f = File(dir, "$key.jpg")
-        if (f.exists() && f.length() > 0) {
-            val b = f.readBytes(); mem.put(key, b)
-            return ok(b)
-        }
+        cached(f)?.let { mem.put(key, it); return ok(it) }
         gate.acquire()
         try {
             mem.get(key)?.let { return ok(it) }
-            if (f.exists() && f.length() > 0) { val b = f.readBytes(); mem.put(key, b); return ok(b) }
+            cached(f)?.let { mem.put(key, it); return ok(it) }
             val small = smaller(src, w)
             val bytes = fetch(small) ?: (if (small != src) fetch(src) else null)
             if (bytes == null) { failed[src] = System.currentTimeMillis(); return notFound() }
@@ -67,17 +64,31 @@ class Thumbs(ctx: Context) {
                 if (scaled !== bmp) bmp.recycle()
                 bmp = scaled
             }
-            val tmp = File(dir, "$key.tmp")
-            tmp.outputStream().use { bmp.compress(Bitmap.CompressFormat.JPEG, 82, it) }
-            bmp.recycle()
-            tmp.renameTo(f)
+            // A poster can be requested by a row and its banner together. Shared .tmp
+            // names allowed those writes to truncate each other and poison the cache.
+            val tmp = File.createTempFile(key + "_", ".tmp", dir)
+            try {
+                tmp.outputStream().use { check(bmp.compress(Bitmap.CompressFormat.JPEG, 82, it)) }
+                check(tmp.renameTo(f))
+            } finally { tmp.delete(); bmp.recycle() }
             val out = f.readBytes(); mem.put(key, out)
+            failed.remove(src)
             return ok(out)
         } catch (e: Throwable) {
             return notFound()
         } finally {
             gate.release()
         }
+    }
+
+    private fun cached(file: File): ByteArray? {
+        return try {
+            if (!file.exists()) return null
+            val b = file.readBytes()
+            if (b.size >= 4 && b[0] == 0xff.toByte() && b[1] == 0xd8.toByte() &&
+                b[b.size - 2] == 0xff.toByte() && b[b.size - 1] == 0xd9.toByte()) b
+            else { file.delete(); null }
+        } catch (e: Exception) { null }
     }
 
     /** Providers often link full-size TMDB posters (1–3 MB). TMDB serves the same picture in small sizes. */
@@ -89,7 +100,10 @@ class Thumbs(ctx: Context) {
 
     private fun fetch(src: String): ByteArray? {
         return try {
-            val (c, s) = Net.open(src, 7000)
+            val (c, s) = Net.open(src, 7000, mapOf(
+                "User-Agent" to "Mozilla/5.0 (Linux; Android 10) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36",
+                "Accept" to "image/jpeg,image/png,image/webp;q=0.9,*/*;q=0.5"
+            ))
             try {
                 val out = java.io.ByteArrayOutputStream()
                 val buf = ByteArray(32 * 1024)
@@ -107,5 +121,5 @@ class Thumbs(ctx: Context) {
         } catch (e: Exception) { null }
     }
 
-    private fun notFound() = WebResourceResponse("image/jpeg", null, 404, "Not found", emptyMap(), ByteArrayInputStream(empty))
+    private fun notFound() = WebResourceResponse("image/jpeg", null, 404, "Not found", mapOf("Cache-Control" to "no-store"), ByteArrayInputStream(empty))
 }
