@@ -87,6 +87,7 @@ class NativeBridge(private val act: MainActivity) {
             .put("model", "${Build.MANUFACTURER} ${Build.MODEL}").put("version", BuildConfig.VERSION_NAME)
             .put("versionCode", BuildConfig.VERSION_CODE)
             .put("sdk", Build.VERSION.SDK_INT)
+            .put("abis", JSONArray(Build.SUPPORTED_ABIS.toList()))
             .put("recovered", act.recovered)
             .put("canInstall", act.updater.canInstall())
             .put("downloader", try { pm.getPackageInfo(Updater.DOWNLOADER, 0); true } catch (e: Exception) { false })
@@ -482,6 +483,10 @@ class NativeBridge(private val act: MainActivity) {
 
     fun onPlayerResult(data: Intent?) {
         val x = data?.extras
+        // VLC is singleTask; Android can return an empty cancellation while its
+        // real player is still opening. Only a documented player result can end
+        // a local stream. Idle cleanup/Stop still handles players with no result.
+        if(externalTorrent && (x==null || !(x.containsKey("extra_position") || x.containsKey("position") || x.containsKey("end_by")))) return
         var pos = -1L; var dur = 0L
         if (x != null) {
             pos = when {

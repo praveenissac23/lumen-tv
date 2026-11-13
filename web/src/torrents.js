@@ -1,4 +1,4 @@
-// Optional catalogue / source adapter. No torrent engine, frameworks or background polling.
+// Optional catalogue/source adapter. Playback starts only after an explicit source action.
 // Accounts are separate from the IPTV state and are never sent to search add-ons.
 import * as N from './native.js';
 import { setting } from './store.js';
@@ -104,7 +104,11 @@ export function normaliseSources(streams) {
     const quality = /2160|\b4k\b/i.test(text) ? 2160 : /1080/.test(text) ? 1080 : /720/.test(text) ? 720 : /480/.test(text) ? 480 : 0;
     const seedMatch = /(?:👤|seed(?:er)?s?\s*[:=]?)\s*([\d,]+)/i.exec(text);
     const seeds = Number.isFinite(+s.seeders) ? +s.seeders : seedMatch ? +seedMatch[1].replace(/,/g, '') : null;
-    out.push({ key, url, hash, fileIdx, text: text || 'Source', quality, seeds, size: +s.behaviorHints?.videoSize || 0,
+    const trackers=[...new Set((Array.isArray(s.sources)?s.sources:[]).slice(0,64).map(source=>{
+      if(typeof source!=='string'||!source.startsWith('tracker:'))return '';
+      try {const value=source.slice(8),u=new URL(value);return ['http:','https:','udp:'].includes(u.protocol)&&u.hostname&&value.length<=2048?value:'';}catch{return '';}
+    }).filter(Boolean))].slice(0,32);
+    out.push({ key, url, hash, fileIdx, trackers, text: text || 'Source', quality, seeds, size: +s.behaviorHints?.videoSize || 0,
       sourceLabel: String(s._lumenSource || '').slice(0, 100), sourceType: s._lumenScope || 'custom' });
   }
   const quality = +(setting('torrentQuality') || 1080);
@@ -269,7 +273,7 @@ export async function resolveSource(stream, provider, episode, choose, active = 
 
 export function magnetUrl(stream) {
   if (!/^[a-f\d]{40}$/i.test(stream.hash || '')) throw new Error('No supported magnet link.');
-  return 'magnet:?xt=urn:btih:' + stream.hash;
+  return 'magnet:?xt=urn:btih:' + stream.hash + (stream.trackers||[]).map(tracker=>'&tr='+encodeURIComponent(tracker)).join('');
 }
 export function torrentServerBase(value) {
   const u = new URL(String(value || '').trim());

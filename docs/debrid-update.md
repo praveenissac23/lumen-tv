@@ -70,3 +70,11 @@ On supported Android devices the native torrent engine is loaded only when a tor
 Android 7 / Fire OS 6 or newer is required for the native torrent engine. The APK includes 32-bit ARM for Fire TV Cube compatibility and ARM64, with x86_64 only in the debug test build. The application retains its original minimum SDK and signing identity for existing installations. APK size necessarily increases because the native engine is bundled, while ordinary IPTV browsing never starts it.
 
 Regression checks include an actual local-peer torrent transfer of the bundled demo MP4, HTTP range/HEAD/suffix/invalid-range checks, Android video metadata extraction from the loopback stream, cancellation, and Android DPAD_CENTER/Menu events opening the same source menu. Service/DOM tests cover VLC handoff from a raw torrent and correct episode selection. No live user subscription or physical Fire Cube is available for testing.
+
+### VLC handoff and smaller device-specific updates
+
+Build 60's 10,852,134-byte universal APK contained 4,163,597 compressed bytes of ARM32 engine code and 5,005,410 bytes of ARM64 engine code. The Fire Cube uses an ARM32 application ABI. Releases now supply one engine architecture per APK, with the original app ID/signing certificate and a smaller Fire Cube download. ARM64 remains a separate asset selected by the in-app updater. This does not return a self-contained torrent application to its former 1.5 MB size; doing that requires external torrent processing.
+
+Add-on tracker URLs now survive source normalization, magnet creation and metadata-only handle removal. An empty Android player result no longer stops an active local stream: a recognized player result, Stop, cancellation or idle cleanup controls its lifetime. Source failures are also shown as visible error toasts.
+
+The release gate now installs checksum-pinned official VLC 3.6.5 in the emulator and exercises the minified release APK. It requires direct-video playback, tracker-only torrent peer discovery, playback through the actual Native bridge while Lumen is backgrounded, and a stream that survives an empty activity result. The existing HTTP range/video-frame checks, artwork test and remote input test remain. Physical Fire Cube and live subscriber accounts are outside this automated test environment.

@@ -1,7 +1,7 @@
 import { findSources, titleMeta, resolvePlayable, prepareDebrid, readySources, magnetUrl, accounts, preferredProvider, PROVIDERS, searchProviders } from '../torrents.js';
 import { setting } from '../store.js';
 import { esc, bytes, safeFile } from '../util.js';
-import { icon, poster, sheet } from '../ui.js';
+import { icon, poster, sheet, toast } from '../ui.js';
 import { focus } from '../nav.js';
 import { sendToDownloader } from '../actions.js';
 import { playVod } from '../player.js';
@@ -216,7 +216,8 @@ export class TorrentDetailScreen {
       }
       if (pkg!=null) {
         const ok=N.openWith(pkg,result.url,{title:this.item.name,file:result.file||safeFile(this.item.name)+'.mp4',mode:download?'download':'play'});
-        this.status(ok===false?'The selected app could not open this video link.':'Opening '+(download?'download manager':'player')+'…'); return;
+        if(ok===false) {const message='The selected app could not open this video link. Check that it is installed.';this.status(message);toast(message,'err');}
+        else this.status('Opening '+(download?'download manager':'player')+'…'); return;
       }
       const sub = this.episode ? `S${this.episode.season} E${this.episode.episode}` : '';
       if (download) {
@@ -228,7 +229,7 @@ export class TorrentDetailScreen {
         const key = 'torrent:' + (this.episode?.id || this.item.id);
         playVod({ title: this.item.name, sub, url: result.url, poster: this.item.img, kind: this.episode ? 'episode' : 'movie', id: key, year: this.item.year, torrentItem: this.item, torrentEpisode: this.episode }, key, () => this.app.reload());
       }
-    } catch (e) { if (alive()) this.status(e.message === 'Cancelled' ? 'Selection cancelled.' : e.message); }
+    } catch (e) { if (alive()) {const message=e.message === 'Cancelled' ? 'Selection cancelled.' : e.message;this.status(message);if(e.message!=='Cancelled')toast(message,'err');} }
     finally { if (alive()) { this.busy = false; this.clearPending(); if (!this.view.contains(document.activeElement)) focus(this.view.querySelector(`[data-source="${this.index}"]`)); } }
   }
   onKey(k) {

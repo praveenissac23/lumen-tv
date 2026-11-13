@@ -28,7 +28,9 @@ export async function checkForUpdate({ quiet = true } = {}) {
     const r = (Array.isArray(list) ? list : []).filter((x) => want.test(x.tag_name || '') && !x.draft)
       .sort((a, b) => (+b.tag_name.replace(/\D/g, '')) - (+a.tag_name.replace(/\D/g, '')))[0] || {};
     const build = +String(r.tag_name || '').replace(/\D/g, '') || 0;
-    const asset = (r.assets || []).find((a) => file.test(a.name));
+    const assets=r.assets||[], abis=N.device().abis||[];
+    const wanted=abis.includes('arm64-v8a')?'app-arm64.apk':'app-release.apk';
+    const asset = (!mac && assets.find(a=>a.name===wanted)) || assets.find(a=>file.test(a.name));
     if (!asset || build <= currentBuild()) {
       update.available = null;
       if (!quiet) toast(`You have the latest version (build ${currentBuild() || '?'})`);

@@ -3,15 +3,15 @@ const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
 const esbuild = require('esbuild');
-const bundle = esbuild.buildSync({ stdin: { contents: `import * as nav from './web/src/nav.js'; import * as ui from './web/src/ui.js'; import * as torrents from './web/src/torrents.js'; import * as store from './web/src/store.js'; import {SearchScreen} from './web/src/screens/searchview.js'; import {TorrentDetailScreen} from './web/src/screens/torrentdetail.js'; import {SettingsScreen} from './web/src/screens/settings.js'; window.testAPI={nav,ui,torrents,store,SearchScreen,TorrentDetailScreen,SettingsScreen};`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
+const bundle = esbuild.buildSync({ stdin: { contents: `import * as nav from './web/src/nav.js'; import * as ui from './web/src/ui.js'; import * as torrents from './web/src/torrents.js'; import * as store from './web/src/store.js'; import * as updates from './web/src/updates.js'; import {SearchScreen} from './web/src/screens/searchview.js'; import {TorrentDetailScreen} from './web/src/screens/torrentdetail.js'; import {SettingsScreen} from './web/src/screens/settings.js'; window.testAPI={nav,ui,torrents,store,updates,SearchScreen,TorrentDetailScreen,SettingsScreen};`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
 const windows = [];
 const runtimeErrors = [];
-function setup(handler = async () => ({}), seed = {}, imageHandler, engineHandler) {
+function setup(handler = async () => ({}), seed = {}, imageHandler, engineHandler, deviceInfo={}) {
   const dom = new JSDOM('<!doctype html><div id="stage"><div id="view"></div><div id="overlays"></div><div id="toast"></div></div>', { url: 'https://lumen.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   dom.window.addEventListener('error',e=>{runtimeErrors.push(String(e.error)); e.preventDefault();});
   const w = dom.window, disk = new Map([['state', JSON.stringify(seed)]]), bodies = new Map(), calls = [];
   w.Native = {
-    cacheRead: (k) => disk.get(k) || null, cacheWrite: (k,v) => disk.set(k,v), deviceInfo: () => '{}',
+    cacheRead: (k) => disk.get(k) || null, cacheWrite: (k,v) => disk.set(k,v), deviceInfo: () => JSON.stringify(deviceInfo),
     http: (id, url) => { calls.push({url,method:'GET'}); Promise.resolve().then(() => handler(url,'GET')).then(r => { bodies.set(id, JSON.stringify(r)); w.__nat('http',{id,ok:true}); }, () => w.__nat('http',{id,ok:false,error:'offline'})); },
     call: (id, method, url, headers, body) => { calls.push({url,method,headers:JSON.parse(headers),body}); Promise.resolve().then(() => handler(url,method,body)).then(r => { bodies.set(id,typeof r === 'string' ? r : JSON.stringify(r)); w.__nat('call',{id,ok:true}); }, () => w.__nat('call',{id,ok:false,error:'offline'})); },
     take: id => { const r=bodies.get(id); bodies.delete(id); return r; }, apps: () => JSON.stringify([{pkg:'org.videolan.vlc',name:'VLC',role:'player'},{pkg:'com.mxtech.videoplayer.ad',name:'MX Player',role:'player'},{pkg:'idm.internet.download.manager',name:'1DM',role:'download'},{pkg:'com.dv.adm',name:'ADM',role:'download'}]), openWith:(pkg,url,options)=>{calls.push({handoff:true,pkg,url,options:JSON.parse(options)});return true;},
@@ -399,4 +399,17 @@ test('built-in torrent engine chooses the requested episode instead of the first
   assert.equal(args[1],1);return {url:'http://127.0.0.1:12345/video',file:'Show.S01E02.mkv'};
  });
  const result=await x.torrents.resolvePlayable({hash,fileIdx:0},'',{season:1,episode:2},()=>assert.fail());assert.match(result.url,/127.0.0.1/);
+});
+
+test('tracker discovery information survives search normalisation and magnet creation',()=>{
+ const x=setup(), hash='c'.repeat(40);
+ const [s]=x.torrents.normaliseSources([{infoHash:hash,sources:['dht:'+hash,'tracker:udp://tracker.test:1337/announce','tracker:https://tracker.test/announce?token=abc','tracker:javascript:alert(1)','tracker:udp://tracker.test:1337/announce']}]);
+ const magnet=new URL(x.torrents.magnetUrl(s));
+ assert.deepEqual([...magnet.searchParams.getAll('tr')],['udp://tracker.test:1337/announce','https://tracker.test/announce?token=abc']);
+ assert.equal(magnet.searchParams.get('xt'),'urn:btih:'+hash);
+});
+
+for(const [abis,expected] of [[['armeabi-v7a','armeabi'],'app-release.apk'],[['arm64-v8a','armeabi-v7a'],'app-arm64.apk']])test('in-app update chooses '+expected+' for '+abis[0],async()=>{
+ const x=setup(async()=>[{tag_name:'build-999',assets:[{name:'app-arm64.apk',browser_download_url:'https://test/64',size:6700000},{name:'app-release.apk',browser_download_url:'https://test/32',size:5900000}]}],{},null,null,{abis,versionCode:60});
+ const u=await x.updates.checkForUpdate();assert.equal(u.url,expected==='app-release.apk'?'https://test/32':'https://test/64');
 });

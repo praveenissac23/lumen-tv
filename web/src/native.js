@@ -288,7 +288,7 @@ export function installUpdateWith(url, mode) { if (N && N.installUpdateWith) N.i
 
 
 // Lazy, built-in torrent playback: only requested after a source action is chosen.
-export const hasLocalTorrentEngine = !!(N && N.torrentPrepare && N.torrentStart);
+export const hasLocalTorrentEngine = !!(N && N.torrentPrepare && N.torrentStart && (+device().sdk || 24) >= 24);
 function torrentRequest(method,args,timeout) {
   if(!hasLocalTorrentEngine) return Promise.reject(new Error('This build has no local torrent engine.'));
   const id=++seq;

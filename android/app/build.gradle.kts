@@ -3,8 +3,12 @@ plugins {
     id("org.jetbrains.kotlin.android")
 }
 
+val torrentAbi = providers.gradleProperty("torrentAbi").orElse("armeabi-v7a").get()
+require(torrentAbi in listOf("armeabi-v7a","arm64-v8a","x86_64"))
+
 android {
     namespace = "tv.lumen.app"
+    testBuildType = providers.gradleProperty("testVariant").orElse("debug").get()
     compileSdk = 34
 
     defaultConfig {
@@ -61,8 +65,8 @@ dependencies {
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
     val torrentVersion = "2.0.15.3"
     implementation("com.frostwire:jlibtorrent:$torrentVersion")
-    releaseImplementation("com.frostwire:jlibtorrent-android-arm:$torrentVersion")
-    releaseImplementation("com.frostwire:jlibtorrent-android-arm64:$torrentVersion")
+    val nativeArtifact=mapOf("armeabi-v7a" to "arm","arm64-v8a" to "arm64","x86_64" to "x86_64").getValue(torrentAbi)
+    releaseImplementation("com.frostwire:jlibtorrent-android-$nativeArtifact:$torrentVersion")
     debugImplementation("com.frostwire:jlibtorrent-android-x86_64:$torrentVersion")
     val media3 = "1.4.1"
     implementation("androidx.media3:media3-exoplayer:$media3")

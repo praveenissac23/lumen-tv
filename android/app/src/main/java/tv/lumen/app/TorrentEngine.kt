@@ -15,6 +15,7 @@ import java.util.concurrent.ThreadPoolExecutor
 import java.util.concurrent.ArrayBlockingQueue
 import java.util.concurrent.TimeUnit
 import java.util.concurrent.atomic.AtomicInteger
+import java.util.concurrent.atomic.AtomicLong
 import kotlin.concurrent.thread
 
 /** One lazy torrent session, one selected file and a loopback HTTP stream for VLC. */
@@ -28,6 +29,7 @@ class TorrentEngine(private val context: Context, private val discovery: Boolean
     @Volatile private var active: Selection? = null
     @Volatile var lastUsed = System.currentTimeMillis(); private set
     val connections = AtomicInteger()
+    val bytesServed = AtomicLong()
     private val server = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
     private var metadata: TorrentInfo? = null
     private var handle: TorrentHandle? = null
@@ -86,6 +88,11 @@ class TorrentEngine(private val context: Context, private val discovery: Boolean
                 check(!closed && !cancelled) { "Torrent playback was stopped" }
                 check(info!=null && info.isValid && info.infoHashV1().toHex().equals(hash,true)) { "No torrent metadata arrived. This source may have no reachable seeders. Try another source." }
             } finally { candidate?.let { if(it.isValid)session.remove(it) } }
+            val query=android.net.Uri.parse("http://localhost/?"+uri.substringAfter('?',""))
+            for(tracker in query.getQueryParameters("tr").distinct().take(32)) {
+                val parsed=android.net.Uri.parse(tracker)
+                if(parsed.scheme in listOf("http","https","udp") && !parsed.host.isNullOrEmpty()) info!!.addTracker(tracker)
+            }
             metadata = info!!; magnet = uri; directory = File(root,hash).apply { mkdirs() }
         }
         val info = metadata!!; val files = info.files(); val list = JSONArray()
@@ -172,7 +179,7 @@ class TorrentEngine(private val context: Context, private val discovery: Boolean
                     // Request the next few seconds early; memory remains bounded by libtorrent's disk queue.
                     for(next in piece+1..minOf(piece+4,s.info.numPieces()-1))s.handle.setPieceDeadline(next,(next-piece)*100)
                     val count=minOf(buffer.size.toLong(),end-position+1,pieceLength-absolute%pieceLength).toInt()
-                    file.seek(position);file.readFully(buffer,0,count);output.write(buffer,0,count)
+                    file.seek(position);file.readFully(buffer,0,count);output.write(buffer,0,count);bytesServed.addAndGet(count.toLong())
                     position+=count;lastUsed=System.currentTimeMillis()
                 }
             }
