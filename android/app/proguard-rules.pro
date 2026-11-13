@@ -3,3 +3,6 @@
     @android.webkit.JavascriptInterface <methods>;
 }
 -keepattributes JavascriptInterface
+
+# SWIG JNI resolves these class and method names from the native library.
+-keep class com.frostwire.jlibtorrent.** { *; }

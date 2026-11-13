@@ -18,3 +18,4 @@ mac/errors.txt
 node_modules
 
 android/app/src/androidTest/assets/artwork-ui.js
+android/app/src/androidTest/assets/source-actions-ui.js

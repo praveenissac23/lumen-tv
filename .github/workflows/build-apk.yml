@@ -98,7 +98,11 @@ jobs:
           package = re.search(r"package: name='([^']+)' versionCode='(\d+)'", text)
           assert package and package[1] == 'tv.lumen.app', 'Update must keep the installed application ID'
           assert int(package[2]) == int(os.environ['BUILD_NUMBER']) and int(package[2]) > 36, 'Update version must exceed build 36'
-          assert os.path.getsize('android/app/build/outputs/apk/release/app-release.apk') < 2000000, 'Unexpected APK size increase'
+          assert os.path.getsize('android/app/build/outputs/apk/release/app-release.apk') < 18000000, 'Unexpected APK size increase'
+          import zipfile
+          with zipfile.ZipFile('android/app/build/outputs/apk/release/app-release.apk') as apk:
+              for abi in ['armeabi-v7a','arm64-v8a']:
+                  assert 'lib/'+abi+'/libjlibtorrent.so' in apk.namelist(), 'Torrent engine missing for '+abi
           PY
 
       - uses: actions/upload-artifact@v4

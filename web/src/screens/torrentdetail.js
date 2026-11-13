@@ -15,24 +15,17 @@ export class TorrentDetailScreen {
     this.index = params.restore?.index || 0;
     this.phase = 'loading'; this.token = 0; this.actionToken = 0;
     const item = this.item;
-    const player = N.KNOWN_APPS.find((a) => a.pkg === setting(item.type === 'series' ? 'playerSeries' : 'playerMovie'))?.name;
-    const downloader = N.KNOWN_APPS.find((a) => a.pkg === setting('downloader'))?.name;
     view.innerHTML = `<div class="td">
       <aside class="td-info">${poster(item)}<h1>${esc(item.name)}</h1><p>${esc(item.year)} · ${item.type === 'series' ? 'Series' : 'Film'}</p><p id="td-description"></p>
-        <button class="f btn" id="td-settings">${icon('gear')}Debrid settings</button></aside>
-      <section class="td-main"><div class="td-heading"><h1 id="td-heading">${item.type === 'series' ? 'Choose an episode' : 'Choose a source'}</h1>
-        <button class="f chip" id="td-provider">${esc(PROVIDERS[preferredProvider()] || 'Connect account')}</button></div>
-        <div class="td-actions" data-group="tdactions"><button class="f btn primary" id="td-play">${icon('play')}${player ? 'Play in ' + esc(player) : 'Play'}</button><button class="f btn" id="td-download">${icon('download')}${downloader ? 'Download with ' + esc(downloader) : 'Download'}</button></div>
-        <p class="td-play-hint">OK plays ready links. Hold OK for upload, download and player options.</p>
+        <button class="f btn" id="td-settings">${icon('gear')}Torrent settings</button></aside>
+      <section class="td-main"><div class="td-heading"><h1 id="td-heading">${item.type === 'series' ? 'Choose an episode' : 'Choose a source'}</h1></div>
+        <p class="td-play-hint">Select a source and press OK for playback, downloads and Debrid actions.</p>
         <div id="td-seasons" class="chips" data-group="tdseasons"></div>
         <div class="td-scroll" data-scroll="y" data-pad="14"><div id="td-list" class="td-list" data-group="tdlist"><p class="st-intro">Loading…</p></div></div>
         <p id="td-status" class="td-status" role="status"></p>
-        <small class="td-foot">External magnets use TorrServer or a torrent app. Debrid uploads are manual.</small>
+        <small class="td-foot">Green means confirmed ready. Uploads happen only when you choose Upload.</small>
       </section></div>`;
     view.querySelector('#td-settings').onclick = () => app.go('settings', { restore: { sec: 'debrid' } });
-    view.querySelector('#td-provider').onclick = () => this.pickProvider();
-    view.querySelector('#td-play').onclick = () => this.launch(false);
-    view.querySelector('#td-download').onclick = () => this.launch(true);
     view.querySelector('#td-seasons').onclick = (e) => { const b = e.target.closest('[data-season]'); if (b) { this.season = +b.dataset.season; this.paintEpisodes(); focus(this.view.querySelector(`[data-season="${this.season}"]`)); } };
     view.querySelector('#td-list').onclick = (e) => {
       if (this.suppressSourceClick) { this.suppressSourceClick = false; e.preventDefault(); return; }
@@ -51,7 +44,7 @@ export class TorrentDetailScreen {
     };
     for(const event of ['pointerup','pointercancel','pointerleave']) sourceList.addEventListener(event,()=>clearTimeout(this.holdTimer));
     view.addEventListener('focused', (e) => { if (e.target.dataset.source != null) { this.index = +e.target.dataset.source; this.markSelection(); } });
-    this.actions(false);
+
     this.load();
   }
   list(html, move = false) {
@@ -59,10 +52,9 @@ export class TorrentDetailScreen {
     const node = this.view.querySelector('#td-list');
     const hadFocus = node.contains(document.activeElement);
     node._off = 0; node.style.transform = ''; node.innerHTML = html;
-    if (move || hadFocus) focus(node.querySelector('.f') || this.view.querySelector('#td-provider'));
+    if (move || hadFocus) focus(node.querySelector('.f') || this.view.querySelector('#td-settings'));
   }
   status(message) { if (!this.dead) this.view.querySelector('#td-status').textContent = message; }
-  actions(on) { for (const id of ['td-play', 'td-download']) this.view.querySelector('#' + id).disabled = !on; }
   async load() {
     if (this.item.type === 'movie') { this.loadSources(); return; }
     try {
@@ -85,7 +77,7 @@ export class TorrentDetailScreen {
     } catch (e) { if (!this.dead) this.list(`<p class="st-intro">${esc(e.message)}</p>`); }
   }
   paintEpisodes(move = false) {
-    this.busy = false; this.phase = 'episodes'; this.actions(false); this.status('');
+    this.busy = false; this.phase = 'episodes'; this.status('');
     this.view.querySelector('#td-heading').textContent = 'Choose an episode';
     this.view.querySelector('#td-season-pick').textContent = 'Season ' + this.season;
     // Draw only a page of episodes, not thousands of focusable DOM nodes.
@@ -98,7 +90,7 @@ export class TorrentDetailScreen {
   }
   async loadSources(move = false, refresh = false) {
     const token = ++this.token;
-    this.busy = false; this.phase = 'sources'; this.sources = []; this.actions(false); this.status('Searching internet torrent indexes…');
+    this.busy = false; this.phase = 'sources'; this.sources = []; this.status('Searching internet torrent indexes…');
     this.view.querySelector('#td-heading').textContent = this.episode ? `S${this.episode.season} E${this.episode.episode} · Sources` : 'Choose a source';
     this.list('<p class="st-intro">Loading sources…</p>');
     if (!searchProviders().length) {
@@ -112,13 +104,13 @@ export class TorrentDetailScreen {
       this.index = Math.min(this.index, Math.max(0, sources.length - 1));
       const rows = sources.map((s, i) => {
         const via = this.sourceProvider(s); const ready = !!s.readyProviders?.length;
-        return `<button class="f td-source ${ready ? 'td-debrid' : ''} ${i === this.index ? 'selected' : ''}" data-source="${i}"><b>${s.quality ? s.quality + 'p' : 'Quality unknown'} <span class="td-route ${ready ? 'td-route-debrid' : 'td-route-external'}">${icon(ready ? 'check' : s.url ? 'play' : 'globe')}<span data-route>${esc(this.routeLabel(s))}</span></span></b><span>${esc(s.text)}</span><small>${[esc(s.sourceLabel), s.size ? bytes(s.size) : '', s.seeds != null ? s.seeds.toLocaleString() + ' seeds' : ''].filter(Boolean).join(' · ')}</small><span class="td-row-play">${icon('play')}${s.url ? 'OK · ' + playerLabel(this.item) : 'OK · External stream'} · Hold for options</span></button>`;
+        return `<button class="f td-source ${ready ? 'td-debrid' : ''} ${i === this.index ? 'selected' : ''}" data-source="${i}"><b>${s.quality ? s.quality + 'p' : 'Quality unknown'} <span class="td-route ${ready ? 'td-route-debrid' : 'td-route-external'}">${icon(ready ? 'check' : s.url ? 'play' : 'globe')}<span data-route>${esc(this.routeLabel(s))}</span></span></b><span>${esc(s.text)}</span><small>${[esc(s.sourceLabel), s.size ? bytes(s.size) : '', s.seeds != null ? s.seeds.toLocaleString() + ' seeds' : ''].filter(Boolean).join(' · ')}</small><span class="td-row-play">${icon('play')}OK · Source options</span></button>`;
       }).join('');
       this.list((rows || '<p class="st-intro">No supported internet torrents were found for this title. Try another source or your IPTV library.</p>') + '<button class="f btn" data-retry>Search sources again</button>', move);
-      this.actions(!!sources.length);
+
       this.status(sources.sourceSummary || 'Search complete.');
       this.refreshAvailability(token, refresh);
-      if (document.activeElement === this.view.querySelector('#td-provider') && !document.querySelector('#overlays .sheet-wrap')) focus(this.view.querySelector(`[data-source="${this.index}"]`));
+      if (document.activeElement === this.view.querySelector('#td-settings') && !document.querySelector('#overlays .sheet-wrap')) focus(this.view.querySelector(`[data-source="${this.index}"]`));
     } catch (e) {
       if (!this.dead && token === this.token) { this.status(e.message); this.list('<button class="f btn" data-retry>Retry sources</button>', move); }
     }
@@ -145,7 +137,7 @@ export class TorrentDetailScreen {
   activateSource(button) {
     const index = +button.dataset.source;
     if (!Number.isInteger(index) || !this.sources?.[index]) return;
-    this.index = index; this.markSelection(); this.launch(false);
+    this.index = index; this.markSelection(); this.sourceOptions(button);
   }
   refreshRoutes() {
     this.view.querySelectorAll('[data-source]').forEach(button => {
@@ -154,22 +146,24 @@ export class TorrentDetailScreen {
       button.querySelector('.td-route').classList.toggle('td-route-debrid',ready);
       button.querySelector('.td-route').classList.toggle('td-route-external',!ready);
       button.querySelector('[data-route]').textContent=this.routeLabel(source);
-      button.querySelector('.td-row-play').innerHTML=icon('play') + (source.url || ready || setting('torrentServer') ? 'OK · '+playerLabel(this.item) : 'OK · External torrent app') + ' · Hold for options';
+      button.querySelector('.td-row-play').innerHTML=icon('list') + 'OK · Source options';
     });
   }
   async sourceOptions(row) {
     if(this.dead || this.menuOpen) return;
+    if(this.busy) N.torrentCancel();
     this.index=+row.dataset.source; this.markSelection();
     const stream=this.sources?.[this.index]; if(!stream) return;
-    ++this.actionToken; this.busy=false; this.actions(true); this.menuOpen=true;
+    this.clearPending(); this.status('Choose an action for this source.');
+    ++this.actionToken; this.busy=false; this.menuOpen=true;
     const options=[
-      {label:'Play in VLC',value:'vlc',icon:'play',hint:stream.url||stream.readyProviders?.length?'Use video link':'Needs TorrServer for an external magnet'},
+      {label:'Play in VLC',value:'vlc',icon:'play',hint:stream.url||stream.readyProviders?.length?'Ready video link':N.hasLocalTorrentEngine?'Stream with Lumen':'Needs a torrent engine'},
       {label:'Open with another player',value:'open',icon:'external'},
       {label:'Download using…',value:'download',icon:'download'},
       ...(stream.hash?Object.entries(PROVIDERS).map(([provider,name])=>({label:'Upload to '+name,value:'upload:'+provider,icon:'plus',hint:accounts()[provider]?.key?'Only when you choose this action':'Connect account in settings'})):[]),
       ...(stream.hash?[{label:'Open magnet in torrent app',value:'magnet',icon:'globe',hint:'Uses an installed torrent app; no Debrid upload'}]:[]),
     ];
-    const choice=await sheet({title:'Torrent source options',options});
+    const choice=await sheet({title:`Source ${this.index + 1} · ${stream.quality ? stream.quality + 'p' : 'Actions'}`,options});
     this.menuOpen=false; if(this.dead) return;
     focus(this.view.querySelector(`[data-source="${this.index}"]`));
     if(choice==='vlc') this.launch(false,{pkg:'org.videolan.vlc'});
@@ -191,22 +185,18 @@ export class TorrentDetailScreen {
     this.status(ok===false?'No torrent app accepted this magnet. Install a torrent-streaming app or configure TorrServer in settings.':'Opening external torrent app. Nothing was uploaded to Debrid.');
   }
   markSelection() { this.view.querySelectorAll('[data-source]').forEach((b) => b.classList.toggle('selected', +b.dataset.source === this.index)); }
-  async pickProvider() {
-    const { accounts } = await import('../torrents.js');
-    const a = accounts(), options = Object.keys(PROVIDERS).filter((p) => a[p]?.key).map((p) => ({ label: PROVIDERS[p], value: p, on: (this.provider || preferredProvider()) === p }));
-    if (!options.length) { this.app.go('settings', { restore: { sec: 'debrid' } }); return; }
-    const p = await sheet({ title: 'Use Debrid account', options });
-    if (this.dead) return;
-    if (p) { this.provider = p; this.view.querySelector('#td-provider').textContent = PROVIDERS[p]; this.refreshRoutes(); }
-    focus(this.view.querySelector('#td-provider'));
+  clearPending() {
+    this.view.querySelectorAll('[aria-busy="true"]').forEach(row=>{row.removeAttribute('aria-busy');row.querySelector('.td-row-play').innerHTML=icon('list')+'OK · Source options';});
   }
   async launch(download, {pkg=null,prepareProvider=null} = {}) {
     if (this.busy || !this.sources?.length || this.dead) return;
     this.busy = true;
+    const pendingRow=this.view.querySelector(`[data-source="${this.index}"]`);
+    if(pendingRow){pendingRow.setAttribute('aria-busy','true');pendingRow.querySelector('.td-row-play').textContent='Starting playback… Press OK for options';}
     const action = ++this.actionToken;
     const token = this.token, stream = this.sources[this.index];
     const alive = () => !this.dead && token === this.token && action === this.actionToken;
-    this.actions(false); this.status('Checking the selected source…');
+    this.status(stream.url || stream.readyProviders?.length ? 'Opening the selected video link…' : N.hasLocalTorrentEngine ? 'Starting torrent stream… Connecting to peers and buffering video.' : 'Checking the selected source…');
     try {
       const result = await (prepareProvider ? prepareDebrid : resolvePlayable)(stream, prepareProvider || this.provider || preferredProvider(), this.episode, async (files) => {
         if (!alive()) return null;
@@ -239,27 +229,23 @@ export class TorrentDetailScreen {
         playVod({ title: this.item.name, sub, url: result.url, poster: this.item.img, kind: this.episode ? 'episode' : 'movie', id: key, year: this.item.year, torrentItem: this.item, torrentEpisode: this.episode }, key, () => this.app.reload());
       }
     } catch (e) { if (alive()) this.status(e.message === 'Cancelled' ? 'Selection cancelled.' : e.message); }
-    finally { if (alive()) { this.busy = false; this.actions(true); if (!this.view.contains(document.activeElement)) focus(this.view.querySelector(`[data-source="${this.index}"]`)); } }
+    finally { if (alive()) { this.busy = false; this.clearPending(); if (!this.view.contains(document.activeElement)) focus(this.view.querySelector(`[data-source="${this.index}"]`)); } }
   }
   onKey(k) {
     const row = document.activeElement?.closest('[data-source]');
     if (row && this.view.contains(row)) {
       if (k === 'hold' || k === 'menu') { this.sourceOptions(row); return true; }
-      if (['ok', 'play', 'playpause'].includes(k)) { this.activateSource(row); return true; }
-      if (k === 'right') { focus(this.view.querySelector('#td-download')); return true; }
+      if (k === 'ok' || k === 'right') { this.sourceOptions(row); return true; }
+      if (k === 'play' || k === 'playpause') { this.index=+row.dataset.source; this.launch(false); return true; }
     }
     if (k === 'back' && this.episode && this.item.type === 'series' && this.phase === 'sources') {
+      if(this.busy)N.torrentCancel();
       ++this.token; this.episode = null; this.paintEpisodes(true); return true;
     }
     if (k === 'left' && document.activeElement?.hasAttribute('data-source')) { focus(this.view.querySelector('#td-settings')); return true; }
     return false;
   }
-  focus() { if (!document.querySelector('#overlays .sheet-wrap')) focus(this.view.querySelector(`[data-source="${this.index}"]`) || this.view.querySelector('#td-provider')); }
+  focus() { if (!document.querySelector('#overlays .sheet-wrap')) focus(this.view.querySelector(`[data-source="${this.index}"]`) || this.view.querySelector('#td-settings')); }
   save() { return { episode: this.episode, season: this.season, index: this.index }; }
-  destroy() { this.dead = true; ++this.token; ++this.actionToken; clearTimeout(this.holdTimer); }
-}
-
-function playerLabel(item) {
-  const name = N.KNOWN_APPS.find(a => a.pkg === setting(item.type === 'series' ? 'playerSeries' : 'playerMovie'))?.name;
-  return name ? 'Play in ' + esc(name) : 'Play';
+  destroy() { if(this.busy)N.torrentCancel();this.dead = true; ++this.token; ++this.actionToken; clearTimeout(this.holdTimer); }
 }

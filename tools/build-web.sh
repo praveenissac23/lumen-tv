@@ -13,9 +13,11 @@ ASSETS="$ROOT/android/app/src/main/assets/web"
 if [ -d "$ROOT/android/app/src/main" ]; then
   rm -rf "$ASSETS" && mkdir -p "$ASSETS" && cp -r "$OUT"/. "$ASSETS"/
   mv "$ASSETS/demo.mp4" "$ROOT/android/app/src/main/assets/demo.mp4"
+  cp "$ROOT/docs/THIRD_PARTY_TORRENT_NOTICES.txt" "$ROOT/android/app/src/main/assets/"
 fi
 du -sh "$OUT"/* | sed "s|$OUT/||"
 
 # Test-only UI fixture: never packaged in the release APK.
 mkdir -p android/app/src/androidTest/assets
 npx esbuild tools/artwork-fixture.js --bundle --format=iife --target=chrome69 --outfile=android/app/src/androidTest/assets/artwork-ui.js
+npx --prefix "$ROOT" esbuild "$ROOT/tools/source-actions-fixture.js" --bundle --format=iife --target=chrome69 --outfile="$ROOT/android/app/src/androidTest/assets/source-actions-ui.js"

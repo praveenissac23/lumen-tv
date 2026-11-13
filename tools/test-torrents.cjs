@@ -6,7 +6,7 @@ const esbuild = require('esbuild');
 const bundle = esbuild.buildSync({ stdin: { contents: `import * as nav from './web/src/nav.js'; import * as ui from './web/src/ui.js'; import * as torrents from './web/src/torrents.js'; import * as store from './web/src/store.js'; import {SearchScreen} from './web/src/screens/searchview.js'; import {TorrentDetailScreen} from './web/src/screens/torrentdetail.js'; import {SettingsScreen} from './web/src/screens/settings.js'; window.testAPI={nav,ui,torrents,store,SearchScreen,TorrentDetailScreen,SettingsScreen};`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
 const windows = [];
 const runtimeErrors = [];
-function setup(handler = async () => ({}), seed = {}, imageHandler) {
+function setup(handler = async () => ({}), seed = {}, imageHandler, engineHandler) {
   const dom = new JSDOM('<!doctype html><div id="stage"><div id="view"></div><div id="overlays"></div><div id="toast"></div></div>', { url: 'https://lumen.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   dom.window.addEventListener('error',e=>{runtimeErrors.push(String(e.error)); e.preventDefault();});
   const w = dom.window, disk = new Map([['state', JSON.stringify(seed)]]), bodies = new Map(), calls = [];
@@ -20,6 +20,12 @@ function setup(handler = async () => ({}), seed = {}, imageHandler) {
     calls.push({artwork:true,url,width});
     Promise.resolve().then(()=>imageHandler(url,width)).then(src=>{bodies.set(id,src);w.__nat('artwork',{id,ok:true});},()=>w.__nat('artwork',{id,ok:false,error:'unavailable'}));
   };
+  if(engineHandler) {
+    for(const method of ['torrentPrepare','torrentStart'])w.Native[method]=(id,...args)=>{
+      calls.push({engine:method,args});Promise.resolve().then(()=>engineHandler(method,args)).then(result=>{bodies.set(id,JSON.stringify(result));w.__nat('call',{id,ok:true});},e=>w.__nat('call',{id,ok:false,error:e.message}));
+    };
+    w.Native.torrentCancel=()=>calls.push({engine:'cancel'});
+  }
   w.eval(bundle); windows.push(w);
   const api = w.testAPI;
   return {...api, w, view:w.document.querySelector('#view'), disk, calls, app:{go(){}, back(){}, reload(){}, openVoice(){}}};
@@ -134,7 +140,7 @@ test('torrents tab and direct detail open without PIN while IPTV parental settin
 });
 test('explicitly disabled internet search keeps detail usable with a path to settings',async()=>{
  const x=setup(undefined,{settings:{lockAdult:false,internetTorrents:false}}); const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Test'}},x.app);
- await delay(10); assert.match(x.view.querySelector('#td-list').textContent,/Internet torrent search is switched off/); assert.equal(x.view.querySelector('#td-play').disabled,true); d.destroy();
+ await delay(10); assert.match(x.view.querySelector('#td-list').textContent,/Internet torrent search is switched off/); assert.equal(x.view.querySelector('#td-play'),null); d.destroy();
 });
 test('Debrid settings render saved state without exposing API keys',()=>{
  const x=setup(); x.torrents.saveAccount('rd','PRIVATE_TOKEN');
@@ -280,16 +286,17 @@ for(const provider of ['rd','ad']) test(provider+' source OK resolves through De
  x.torrents.saveAccount(provider,'TEST');
  const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);
  await delay(20);const row=x.view.querySelector('[data-source="0"]');row.focus();
- assert.ok(row.classList.contains('td-debrid'));assert.match(row.textContent,provider==='rd'?/Real-Debrid/:/AllDebrid/);assert.match(row.textContent,/OK · Play in VLC/);
- assert.equal(d.onKey('ok'),true);d.onKey('ok');await delay(20);
+ assert.ok(row.classList.contains('td-debrid'));assert.match(row.textContent,provider==='rd'?/Real-Debrid/:/AllDebrid/);assert.match(row.textContent,/OK · Source options/);
+ assert.equal(d.onKey('ok'),true);assert.match(x.w.document.querySelector('.sheet').textContent,/Play in VLC/);assert.equal(x.calls.filter(c=>c.handoff).length,0);x.w.document.querySelector('.sheet-item').click();await delay(20);
  const handoffs=x.calls.filter(c=>c.handoff);assert.equal(handoffs.length,1);assert.equal(handoffs[0].pkg,'org.videolan.vlc');assert.equal(handoffs[0].url,'https://cdn.test/'+provider+'.mkv');d.destroy();
 });
-test('pointer click on a source starts selected stream and Right reaches Download immediately',async()=>{
+test('source click opens its own actions; floating play/download/account controls are absent',async()=>{
  const x=setup(async()=>({streams:[{url:'https://cdn.test/first.mp4'},{url:'https://cdn.test/second.mp4'}]}),{settings:{playerMovie:'org.videolan.vlc'}});
  const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(20);
  const row=x.view.querySelector('[data-source="1"]');row.querySelector('b').click();await delay(10);
- assert.equal(x.calls.find(c=>c.handoff).url,'https://cdn.test/second.mp4');row.focus();assert.equal(d.onKey('right'),true);assert.equal(x.w.document.activeElement.id,'td-download');
- assert.ok(x.view.querySelector('.td-actions').compareDocumentPosition(x.view.querySelector('.td-scroll'))&4);d.destroy();
+ assert.equal(x.calls.filter(c=>c.handoff).length,0);assert.match(x.w.document.querySelector('.sheet h2').textContent,/Source 2/);
+ x.w.document.querySelector('.sheet-item').click();await delay(10);assert.equal(x.calls.find(c=>c.handoff).url,'https://cdn.test/second.mp4');
+ assert.equal(x.view.querySelectorAll('#td-play,#td-download,#td-provider').length,0);d.destroy();
 });
 test('Debrid badges update when account changes and known direct links show provider clearly',async()=>{
  const x=setup(async()=>({streams:[{infoHash:'c'.repeat(40)},{url:'https://download.real-debrid.com/video.mkv'}]}));x.torrents.saveAccount('rd','TEST');x.torrents.saveAccount('ad','TEST');
@@ -376,4 +383,20 @@ test('cancelling the nested downloader chooser returns focus to the selected sou
 
 test('Down from the last number row does not skip Space, Delete and Clear',()=>{
  const x=setup();const s=new x.SearchScreen(x.view,{},x.app);x.view.querySelectorAll('.kb .key')[30].focus();assert.equal(s.onKey('down'),false);s.destroy();
+});
+
+test('raw torrent Play in VLC uses the built-in engine and never opens a magnet chooser',async()=>{
+ const hash='a'.repeat(40);
+ const x=setup(async()=>({streams:[{infoHash:hash,fileIdx:0}]}),{},null,async(method,args)=>method==='torrentPrepare'?{hash,files:[{id:0,name:'Film.mp4',size:1000}]}:{url:'http://127.0.0.1:12345/stream/test',file:'Film.mp4',size:1000});
+ const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(20);x.view.querySelector('[data-source]').focus();d.onKey('ok');
+ assert.equal(x.calls.filter(c=>c.engine).length,0);x.w.document.querySelector('.sheet-item').click();await delay(30);
+ assert.equal(x.calls.filter(c=>c.engine==='torrentPrepare').length,1);assert.equal(x.calls.filter(c=>c.engine==='torrentStart').length,1);
+ const handoff=x.calls.find(c=>c.handoff);assert.equal(handoff.pkg,'org.videolan.vlc');assert.equal(handoff.options.mode,'play');assert.match(handoff.url,/^http:\/\/127.0.0.1:/);assert.ok(x.calls.every(c=>!c.url?.includes('/upload')));d.destroy();
+});
+test('built-in torrent engine chooses the requested episode instead of the first pack file',async()=>{
+ const hash='b'.repeat(40);const x=setup(undefined,{},null,async(method,args)=>{
+  if(method==='torrentPrepare')return {hash,files:[{id:0,name:'Show.S01E01.mkv'},{id:1,name:'Show.S01E02.mkv'}]};
+  assert.equal(args[1],1);return {url:'http://127.0.0.1:12345/video',file:'Show.S01E02.mkv'};
+ });
+ const result=await x.torrents.resolvePlayable({hash,fileIdx:0},'',{season:1,episode:2},()=>assert.fail());assert.match(result.url,/127.0.0.1/);
 });

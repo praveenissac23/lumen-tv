@@ -48,6 +48,7 @@ android {
     }
     kotlinOptions { jvmTarget = "17" }
     buildFeatures { buildConfig = true }
+    packaging { jniLibs.useLegacyPackaging = true }
     androidResources { noCompress += listOf("mp4") }
     lint {
         abortOnError = false
@@ -58,6 +59,11 @@ android {
 dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    val torrentVersion = "2.0.15.3"
+    implementation("com.frostwire:jlibtorrent:$torrentVersion")
+    releaseImplementation("com.frostwire:jlibtorrent-android-arm:$torrentVersion")
+    releaseImplementation("com.frostwire:jlibtorrent-android-arm64:$torrentVersion")
+    debugImplementation("com.frostwire:jlibtorrent-android-x86_64:$torrentVersion")
     val media3 = "1.4.1"
     implementation("androidx.media3:media3-exoplayer:$media3")
     implementation("androidx.media3:media3-exoplayer-hls:$media3")

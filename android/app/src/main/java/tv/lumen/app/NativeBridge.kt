@@ -30,6 +30,7 @@ class NativeBridge(private val act: MainActivity) {
     private val artworkIo = Executors.newFixedThreadPool(3) // never block catalogue/search calls behind posters
     private val bodies = ConcurrentHashMap<Int, String>()
     private val dir: File = File(act.filesDir, "cache").apply { mkdirs() }
+    private var externalTorrent = false
     private var recognizer: SpeechRecognizer? = null
 
     private fun emit(evt: String, data: JSONObject) = act.emit(evt, data)
@@ -50,6 +51,27 @@ class NativeBridge(private val act: MainActivity) {
                 emit("artwork", JSONObject().put("id", id).put("ok", false).put("error", "Image could not be loaded"))
             }
         }
+    }
+
+    // The torrent engine is lazy and does not run during normal IPTV browsing.
+    @JavascriptInterface
+    fun torrentPrepare(id:Int,magnet:String) {
+        if(Build.VERSION.SDK_INT<24) { emit("call",JSONObject().put("id",id).put("ok",false).put("error","Local torrent playback needs Android 7 / Fire OS 6 or newer"));return }
+        ui {
+            try {
+                val service=Intent(act,TorrentPlaybackService::class.java)
+                if(Build.VERSION.SDK_INT>=26)act.startForegroundService(service)else act.startService(service)
+                TorrentRuntime.prepare(act,magnet){result,error->torrentReply(id,result,error)}
+            }catch(e:Exception){torrentReply(id,null,e.message?:"Could not start torrent playback")}
+        }
+    }
+    @JavascriptInterface
+    fun torrentStart(id:Int,hash:String,file:Int) = TorrentRuntime.start(act,hash,file){result,error->torrentReply(id,result,error)}
+    @JavascriptInterface
+    fun torrentCancel() = TorrentRuntime.stop(act)
+    private fun torrentReply(id:Int,result:JSONObject?,error:String?) {
+        if(result!=null)bodies[id]=result.toString()
+        emit("call",JSONObject().put("id",id).put("ok",result!=null).put("error",error?:""))
     }
 
     // ---------- device ----------
@@ -347,6 +369,7 @@ class NativeBridge(private val act: MainActivity) {
                         // so Continue watching works with them too. That needs a result, so no new task.
                         intent.flags = intent.flags and Intent.FLAG_ACTIVITY_NEW_TASK.inv()
                         intent.putExtra("return_result", true)
+                        externalTorrent = TorrentRuntime.current?.owns(url) == true
                         act.startActivityForResult(intent, MainActivity.REQ_EXT)
                     }
                     else act.startActivity(intent)
@@ -473,6 +496,7 @@ class NativeBridge(private val act: MainActivity) {
             }
         }
         val done = x?.getString("end_by") == "playback_completion"
+        if(externalTorrent) { externalTorrent=false;TorrentRuntime.stop(act) }
         emit("extplayer", JSONObject().put("pos", pos).put("dur", dur).put("done", done))
     }
 

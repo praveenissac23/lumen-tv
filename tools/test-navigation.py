@@ -80,7 +80,7 @@ try:
     page.locator('[data-tab=torrents]').click()
     page.locator('[data-torrent="0"]').click()
     page.wait_for_selector('[data-source="0"]')
-    assert page.locator('#td-play').is_enabled()
+    assert page.locator('#td-play,#td-download,#td-provider').count()==0
     assert 'Direct video link' in page.locator('[data-source="0"]').inner_text()
     assert 'internet torrents' in page.locator('#td-status').inner_text()
     page.wait_for_function('document.querySelectorAll(".td-debrid").length===2')
@@ -105,23 +105,22 @@ try:
     page.keyboard.press('Escape')
     page.wait_for_selector('.sheet-wrap',state='detached')
     focused()
-    # OK on the remote routes the focused row straight to playback, once.
+    # A short OK opens the in-app actions, not Android's Open With chooser.
     page.evaluate("window.__plays=[];__app.current().ctl.launch=function(download){window.__plays.push({index:this.index,download})};true")
     page.locator('[data-source="0"]').focus()
     page.keyboard.press('Enter')
-    assert page.evaluate('JSON.stringify(__plays)') == '[{"index":0,"download":false}]', page.evaluate('JSON.stringify({plays:__plays,active:document.activeElement.outerHTML})')
-    assert 'OK · Play' in page.locator('[data-source="0"]').inner_text()
+    page.wait_for_selector('.sheet-wrap')
+    assert page.evaluate('__plays.length')==0
+    assert 'Play in VLC' in page.locator('.sheet').inner_text()
+    page.locator('.sheet-item').filter(has_text='Play in VLC').click()
+    assert page.evaluate('JSON.stringify(__plays)')=='[{"index":0,"download":false}]'
     for _ in range(12):
-        page.keyboard.press('ArrowDown')
-        focused()
+        page.keyboard.press('ArrowDown'); focused()
     assert page.evaluate('document.activeElement.hasAttribute("data-source")')
-    page.keyboard.press('Enter')
-    assert page.evaluate('__plays.length') == 2
-    assert page.evaluate('__plays[1].index > 0 && !__plays[1].download')
-    assert page.locator('#td-play').evaluate('(b)=>{const r=b.getBoundingClientRect();return r.top>=0&&r.bottom<=innerHeight}')
-    page.keyboard.press('ArrowRight')
-    assert page.evaluate('document.activeElement.id') == 'td-download'
-    focused()
+    page.keyboard.press('Enter'); page.wait_for_selector('.sheet-wrap')
+    assert 'Upload to AllDebrid' in page.locator('.sheet').inner_text()
+    page.screenshot(path=str(ROOT/'build/navigation-shots/source-ok-menu.png'))
+    page.keyboard.press('Escape'); focused()
     page.keyboard.press('Escape')
     page.wait_for_selector('[data-torrent="0"]')
     assert page.locator('[data-tab=torrents]').get_attribute('aria-pressed') == 'true'

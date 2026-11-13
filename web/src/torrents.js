@@ -321,6 +321,14 @@ export async function resolvePlayable(stream, provider, episode, choose, active 
     try { return await resolveSource(stream,ready.provider,episode,choose,active,true); }
     catch(e) { if(e.message==='Cancelled' || !active()) throw new Error('Cancelled'); readyCache.clear(); stream.readyProviders=[]; }
   }
+  if (N.hasLocalTorrentEngine) {
+    const metadata=await N.torrentPrepare(magnetUrl(stream));
+    if(!active()){N.torrentCancel();throw new Error('Cancelled');}
+    let file;
+    try { file=await chooseVideo(metadata.files || [],stream,episode,choose); } catch(e) { N.torrentCancel();throw e; }
+    if(!active()){N.torrentCancel();throw new Error('Cancelled');}
+    return N.torrentStart(metadata.hash,file.id);
+  }
   const configured = setting('torrentServer');
   if (!configured) return {url:magnetUrl(stream),magnet:true};
   const base = torrentServerBase(configured), query = new URLSearchParams({link:magnetUrl(stream)});

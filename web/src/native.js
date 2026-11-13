@@ -285,3 +285,19 @@ on('textinput', (d) => { const w = textWaiter; textWaiter = null; if (w) w(d && 
 export function installUpdate(url) { if (N && N.installUpdate) N.installUpdate(url); }
 // mode: 'auto' | 'amazon' | 'downloader' (TV only)
 export function installUpdateWith(url, mode) { if (N && N.installUpdateWith) N.installUpdateWith(url, mode); else installUpdate(url); }
+
+
+// Lazy, built-in torrent playback: only requested after a source action is chosen.
+export const hasLocalTorrentEngine = !!(N && N.torrentPrepare && N.torrentStart);
+function torrentRequest(method,args,timeout) {
+  if(!hasLocalTorrentEngine) return Promise.reject(new Error('This build has no local torrent engine.'));
+  const id=++seq;
+  return new Promise((resolve,reject)=>{
+    const timer=setTimeout(()=>{pending.delete(id);if(N.torrentCancel)N.torrentCancel();reject(new Error('Torrent playback timed out. Try a source with more seeders.'));},timeout);
+    pending.set(id,{resolve:raw=>{clearTimeout(timer);try{resolve(JSON.parse(raw));}catch{reject(new Error('Invalid torrent engine response.'));}},reject:e=>{clearTimeout(timer);reject(e)}});
+    try { N[method](id,...args); } catch(e){pending.delete(id);clearTimeout(timer);reject(e);}
+  });
+}
+export const torrentPrepare = magnet => torrentRequest('torrentPrepare',[magnet],45000);
+export const torrentStart = (hash,file) => torrentRequest('torrentStart',[hash,file],55000);
+export function torrentCancel() { if(N && N.torrentCancel)N.torrentCancel(); }
