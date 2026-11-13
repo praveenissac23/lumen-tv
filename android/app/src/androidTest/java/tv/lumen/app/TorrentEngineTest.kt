@@ -60,7 +60,7 @@ class TorrentEngineTest {
             val(head,_)=request(null,"HEAD");assertEquals(200,head.responseCode);assertEquals(payload.size.toLong(),head.getHeaderFieldLong("Content-Length",-1));head.disconnect()
             val(bad,_bad)=request("bytes=${payload.size}-");assertEquals(416,bad.responseCode);bad.disconnect()
             val retriever=MediaMetadataRetriever()
-            try { retriever.setDataSource(url,emptyMap());assertTrue("Android must parse the video from the torrent HTTP stream",(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?:0)>0) } finally {retriever.release()}
+            try { retriever.setDataSource(url,emptyMap());assertTrue("Android must parse the video from the torrent HTTP stream",(retriever.extractMetadata(MediaMetadataRetriever.METADATA_KEY_DURATION)?.toLongOrNull()?:0)>0);val frame=retriever.getFrameAtTime(1000000);assertNotNull("Android must decode a video frame from the torrent stream",frame);frame?.recycle() } finally {retriever.release()}
             val pool=Executors.newSingleThreadExecutor()
             try {
                 val future=pool.submit<Boolean>{try{engine.prepare("magnet:?xt=urn:btih:${"f".repeat(40)}");false}catch(_:Exception){true}}

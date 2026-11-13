@@ -71,7 +71,15 @@ class TorrentEngine(private val context: Context, private val discovery: Boolean
                     candidate=session.find(Sha1Hash(hash))
                     if(candidate!=null && candidate.isValid) {
                         candidate.unsetFlags(TorrentFlags.AUTO_MANAGED);candidate.resume()
-                        if(candidate.status().hasMetadata()) { info=candidate.torrentFile();if(info!=null && info.isValid)break }
+                        if(candidate.status().hasMetadata()) {
+                            val borrowed=candidate.torrentFile()
+                            if(borrowed!=null && borrowed.isValid && borrowed.numFiles()>0) {
+                                // torrentFile() is borrowed from the running handle. Own a decoded
+                                // snapshot before removing that metadata-only handle.
+                                info=TorrentInfo(borrowed.bencode())
+                                if(info.isValid && info.numFiles()>0)break
+                            }
+                        }
                     }
                     Thread.sleep(80)
                 }
