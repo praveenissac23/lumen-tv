@@ -1,0 +1,59 @@
+name: Complete build 70 compatibility assets
+on:
+  push:
+    branches: ['fix/release-70-compatibility']
+    paths: ['.github/workflows/release-70-compatibility.yml']
+permissions:
+  contents: write
+  actions: read
+jobs:
+  compatibility:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    env:
+      GH_TOKEN: ${{ github.token }}
+      GH_REPO: praveenissac23/lumen-tv
+    steps:
+      - name: Verify and publish Fire Cube compatibility APK
+        run: |
+          mkdir -p "$RUNNER_TEMP/lumen70"
+          gh release download build-70 --pattern app-release.apk --dir "$RUNNER_TEMP/lumen70"
+          echo "cf41da07cac4b01752674981c36ea54436194eae65bdff2a6e32892106df375b  $RUNNER_TEMP/lumen70/app-release.apk" | sha256sum --check
+          cp "$RUNNER_TEMP/lumen70/app-release.apk" "$RUNNER_TEMP/lumen70/0-fire-cube.apk"
+          gh release upload build-70 "$RUNNER_TEMP/lumen70/0-fire-cube.apk" --clobber
+      - name: Publish verified VLC screenshots
+        run: |
+          gh run download 43420043786 --name lumen-build-70 --dir "$RUNNER_TEMP/lumen-verified"
+          cp "$RUNNER_TEMP/lumen-verified/build/vlc-shots/vlc-tests/vlc-direct-video.png" "$RUNNER_TEMP/lumen70/VLC-direct-playback.png"
+          cp "$RUNNER_TEMP/lumen-verified/build/vlc-shots/vlc-tests/vlc-torrent-video.png" "$RUNNER_TEMP/lumen70/VLC-torrent-playback.png"
+          gh release upload build-70 "$RUNNER_TEMP/lumen70/VLC-direct-playback.png" "$RUNNER_TEMP/lumen70/VLC-torrent-playback.png" --clobber
+      - name: Verify older and newer updater selections and persist screenshots
+        run: |
+          python3 - <<'PY'
+          import base64, hashlib, json, os, pathlib, urllib.request
+          repo=os.environ['GH_REPO']
+          def api(path,data=None,method=None):
+              body=None if data is None else json.dumps(data).encode()
+              request=urllib.request.Request('https://api.github.com/repos/'+repo+'/'+path,body,headers={'Authorization':'Bearer '+os.environ['GH_TOKEN'],'Accept':'application/vnd.github+json','X-GitHub-Api-Version':'2022-11-28'},method=method or ('POST' if body is not None else 'GET'))
+              return json.load(urllib.request.urlopen(request))
+          release=api('releases/tags/build-70')
+          apks=[a for a in release['assets'] if a['name'].endswith('.apk')]
+          assert apks[0]['name']=='0-fire-cube.apk', 'Legacy updater must select the Fire Cube APK first'
+          expected='cf41da07cac4b01752674981c36ea54436194eae65bdff2a6e32892106df375b'
+          assert apks[0]['digest']=='sha256:'+expected and apks[0]['size']==5848464
+          for name in ['app-release.apk','app-arm64.apk']:
+              assert any(a['name']==name and a['state']=='uploaded' for a in apks)
+          print('PASS: legacy updater chooses verified ARM32; newer ABI-specific asset names remain available.')
+          folder=pathlib.Path(os.environ['RUNNER_TEMP'])/'lumen70'
+          entries=[]
+          for name in ['VLC-direct-playback.png','VLC-torrent-playback.png']:
+              payload=(folder/name).read_bytes()
+              blob=api('git/blobs',{'encoding':'base64','content':base64.b64encode(payload).decode()})
+              entries.append({'path':'design/verification/build70/'+name,'mode':'100644','type':'blob','sha':blob['sha']})
+          parent=os.environ['GITHUB_SHA']
+          commit=api('git/commits/'+parent)
+          tree=api('git/trees',{'base_tree':commit['tree']['sha'],'tree':entries})
+          saved=api('git/commits',{'message':'Save actual VLC playback verification screenshots for build 70 [skip ci]','tree':tree['sha'],'parents':[parent]})
+          api('git/refs/heads/'+os.environ['GITHUB_REF_NAME'],{'sha':saved['sha'],'force':False},method='PATCH')
+          print(json.dumps({'screenshots':entries,'commit':saved['sha']}))
+          PY
