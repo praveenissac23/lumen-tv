@@ -16,6 +16,7 @@ import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.webkit.JavascriptInterface
 import org.json.JSONObject
+import org.json.JSONArray
 import java.io.File
 import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.Executors
