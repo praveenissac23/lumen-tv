@@ -48,7 +48,7 @@ class TorrentEngineTest {
             assertEquals(hash,metadata.getString("hash"));assertEquals("fixture.mp4",metadata.getJSONArray("files").getJSONObject(0).getString("name"))
             val result=engine.startStream(hash,0);val url=result.getString("url")
             assertTrue(url.startsWith("http://127.0.0.1:"));assertEquals(payload.size.toLong(),result.getLong("size"))
-            fun request(range:String?,method:String="GET"):Pair<HttpURLConnection,ByteArray>{
+            fun request(range:String?,method:String="GET"):kotlin.Pair<HttpURLConnection,ByteArray>{
                 val c=URL(url).openConnection() as HttpURLConnection;c.connectTimeout=10000;c.readTimeout=20000;c.requestMethod=method
                 if(range!=null)c.setRequestProperty("Range",range)
                 val code=c.responseCode;val bytes=if(method=="HEAD"||code>=400)ByteArray(0)else c.inputStream.use{it.readBytes()}
