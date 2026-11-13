@@ -42,6 +42,9 @@ android {
         release {
             isMinifyEnabled = true
             isShrinkResources = true
+            if (providers.gradleProperty("testVariant").orNull == "release") {
+                proguardFiles("instrumented-runtime.pro")
+            }
             proguardFiles(getDefaultProguardFile("proguard-android-optimize.txt"), "proguard-rules.pro")
             signingConfig = signingConfigs.findByName("lumen") ?: signingConfigs.getByName("debug")
         }
