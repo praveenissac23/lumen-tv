@@ -101,7 +101,7 @@ class TorrentEngine(private val context: Context, private val discovery: Boolean
         check(size > 0 && size < dir.usableSpace - 128L * 1024 * 1024) { "Not enough free storage for this video. Choose a smaller source." }
         val path = File(dir,files.filePath(index)).canonicalFile
         check(path.path.startsWith(dir.canonicalPath + File.separator)) { "Invalid video path" }
-        val peers = android.net.Uri.parse(magnet).getQueryParameters("x.pe").mapNotNull { endpoint ->
+        val peers = android.net.Uri.parse("http://localhost/?"+magnet.substringAfter('?',"" )).getQueryParameters("x.pe").mapNotNull { endpoint ->
             try { val split=endpoint.lastIndexOf(':'); TcpEndpoint(endpoint.substring(0,split),endpoint.substring(split+1).toInt()) } catch (_: Exception) { null }
         }
         session.download(info,dir,null,Priority.array(Priority.IGNORE,info.numFiles()),peers,TorrentFlags.PAUSED)
