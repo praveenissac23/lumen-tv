@@ -146,4 +146,6 @@ jobs:
             --title "Lumen TV build ${{ github.run_number }}" \
             --notes "${NOTES:-Manual build}" --draft
           gh release upload "build-${{ github.run_number }}" build/apks/app-arm64.apk
+          cp build/apks/app-release.apk build/apks/0-fire-cube.apk
+          gh release upload "build-${{ github.run_number }}" build/apks/0-fire-cube.apk
           gh release edit "build-${{ github.run_number }}" --draft=false --latest
