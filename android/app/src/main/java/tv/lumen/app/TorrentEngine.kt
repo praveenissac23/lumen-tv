@@ -62,7 +62,7 @@ class TorrentEngine(private val context: Context, private val discovery: Boolean
             active = null; clients.forEach { try { it.close() } catch (_: Exception) {} }
             handle?.let { session.remove(it) }; handle = null
             directory?.deleteRecursively()
-            session.download(uri,root,TorrentFlags.UPLOAD_MODE.or(TorrentFlags.STOP_WHEN_READY))
+            session.download(uri,root,TorrentFlags.UPLOAD_MODE.or_(TorrentFlags.STOP_WHEN_READY))
             val deadline=System.currentTimeMillis()+35000
             var candidate: TorrentHandle?=null
             var info: TorrentInfo?=null
