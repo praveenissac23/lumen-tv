@@ -11,3 +11,6 @@
 -keep class tv.lumen.app.MainActivity { public *; protected void onActivityResult(int, int, android.content.Intent); }
 -keep class tv.lumen.app.TorrentEngine { public *; }
 -keep class tv.lumen.app.TorrentRuntime { public *; }
+
+# Instrumentation shares this library with the app; retain its external entry points.
+-keep class androidx.tracing.** { *; }
