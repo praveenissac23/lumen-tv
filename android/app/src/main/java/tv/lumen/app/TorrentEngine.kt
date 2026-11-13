@@ -77,8 +77,9 @@ class TorrentEngine(private val context: Context, private val discovery: Boolean
                             val borrowed=candidate.torrentFile()
                             if(borrowed!=null && borrowed.isValid && borrowed.numFiles()>0) {
                                 // torrentFile() is borrowed from the running handle. Own a decoded
-                                // snapshot before removing that metadata-only handle.
-                                info=TorrentInfo(borrowed.bencode())
+                                // native copy before removing that metadata-only handle. Serializing
+                                // magnet metadata can fail before v2 piece layers have arrived.
+                                info=TorrentInfo(com.frostwire.jlibtorrent.swig.torrent_info(borrowed.swig()))
                                 if(info.isValid && info.numFiles()>0)break
                             }
                         }
