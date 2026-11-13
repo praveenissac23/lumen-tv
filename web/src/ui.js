@@ -259,7 +259,7 @@ export function form({ title, fields, submit = 'Save', note = '' }) {
     </div></div>`);
     document.getElementById('overlays').appendChild(root);
     const close = (v) => { popLayer(layer); root.remove(); resolve(v); };
-    const values = () => Object.fromEntries(fields.map((f) => [f.name, root.querySelector(`[name="${f.name}"]`).value.trim()]));
+    const values = () => fields.reduce((out,f)=>{out[f.name]=root.querySelector(`[name="${f.name}"]`).value.trim();return out;},{});
     const err = root.querySelector('.form-err');
     const ok = async () => {
       const v = values();

@@ -413,3 +413,9 @@ for(const [abis,expected] of [[['armeabi-v7a','armeabi'],'app-release.apk'],[['a
  const x=setup(async()=>[{tag_name:'build-999',assets:[{name:'app-arm64.apk',browser_download_url:'https://test/64',size:6700000},{name:'app-release.apk',browser_download_url:'https://test/32',size:5900000}]}],{},null,null,{abis,versionCode:60});
  const u=await x.updates.checkForUpdate();assert.equal(u.url,expected==='app-release.apk'?'https://test/32':'https://test/64');
 });
+
+test('Debrid account entry submits on older TV WebViews without Object.fromEntries',async()=>{
+ const x=setup();x.w.Object.fromEntries=undefined;const pending=x.ui.form({title:'Connect account',fields:[{name:'key',label:'API key',required:true}]});
+ x.w.document.querySelector('input[name=key]').value=' TEST_KEY ';x.w.document.querySelector('.form [data-a=ok]').click();
+ assert.equal((await pending).key,'TEST_KEY');
+});
