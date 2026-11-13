@@ -50,7 +50,7 @@ jobs:
       - name: Check minified release playback in installed VLC and Android WebView
         uses: reactivecircus/android-emulator-runner@v2
         with:
-          api-level: 29
+          api-level: 28
           arch: x86_64
           target: google_apis
           disable-animations: true

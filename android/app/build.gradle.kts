@@ -63,6 +63,7 @@ android {
 dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
+    androidTestImplementation("com.google.errorprone:error_prone_annotations:2.28.0")
     val torrentVersion = "2.0.15.3"
     implementation("com.frostwire:jlibtorrent:$torrentVersion")
     val nativeArtifact=mapOf("armeabi-v7a" to "arm","arm64-v8a" to "arm64","x86_64" to "x86_64").getValue(torrentAbi)
