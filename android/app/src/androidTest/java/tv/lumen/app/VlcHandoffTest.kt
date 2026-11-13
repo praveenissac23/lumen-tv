@@ -57,8 +57,20 @@ class VlcHandoffTest {
             }
             scan(root)
             check(close?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)==true){"Could not close VLC's first-run tutorial"}
-            shell("input keyevent 126") // Resume after the tutorial, as a user would.
-            return true
+            // The tutorial pauses playback. Media keys can be intercepted by the
+            // emulator's telecom session, so use VLC's actual visible Play button.
+            repeat(12){
+                Thread.sleep(100)
+                var play:android.view.accessibility.AccessibilityNodeInfo?=null
+                fun findPlay(node:android.view.accessibility.AccessibilityNodeInfo){
+                    if(node.isVisibleToUser && node.isClickable && node.contentDescription?.toString()?.equals("Play",true)==true)play=node
+                    for(i in 0 until node.childCount)node.getChild(i)?.let{findPlay(it)}
+                }
+                ins.uiAutomation.rootInActiveWindow?.let{findPlay(it)}
+                if(play?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)==true)return true
+                if(vlcPlaying())return true
+            }
+            error("VLC's Play control was not available after closing the tutorial")
         }
         fun settleVlc(){repeat(6){Thread.sleep(250);dismissVlcTips()};waitFor("VLC did not resume after tutorial",5000){vlcPlaying()}}
         fun screenshot(name:String){ins.uiAutomation.takeScreenshot()?.let{bitmap->File(screenshots,name).outputStream().use{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)};bitmap.recycle()}}
