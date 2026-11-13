@@ -59,6 +59,7 @@ class TorrentVlcFixture(context:Context):AutoCloseable {
                     val range=headers["range"]?.let{r->Regex("bytes=(\\d+)-(\\d*)").matchEntire(r)}
                     val start=range?.groupValues?.get(1)?.toIntOrNull()?:0
                     val end=(range?.groupValues?.get(2)?.toIntOrNull()?:payload.lastIndex).coerceAtMost(payload.lastIndex)
+                    if(start>=payload.size || start>end){output.write("HTTP/1.1 416 Range Not Satisfiable\r\nContent-Range: bytes */${payload.size}\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray());return@use}
                     val extra=if(range!=null)"Content-Range: bytes $start-$end/${payload.size}\r\n" else ""
                     output.write("HTTP/1.1 ${if(range!=null)"206 Partial Content" else "200 OK"}\r\nContent-Type: video/mp4\r\nAccept-Ranges: bytes\r\nContent-Length: ${end-start+1}\r\n${extra}Connection: close\r\n\r\n".toByteArray())
                     if(request[0]!="HEAD")output.write(payload,start,end-start+1)

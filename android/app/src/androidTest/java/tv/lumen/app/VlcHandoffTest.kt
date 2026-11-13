@@ -42,6 +42,25 @@ class VlcHandoffTest {
             val sessions=shell("dumpsys media_session")
             return sessions.contains("org.videolan.vlc") && Regex("state=3\\b").containsMatchIn(sessions)
         }
+        fun dismissVlcTips():Boolean {
+            val root=ins.uiAutomation.rootInActiveWindow ?: return false
+            val title=root.findAccessibilityNodeInfosByText("Video player tips").firstOrNull() ?: return false
+            val titleBounds=android.graphics.Rect();title.getBoundsInScreen(titleBounds)
+            var close:android.view.accessibility.AccessibilityNodeInfo?=null
+            fun scan(node:android.view.accessibility.AccessibilityNodeInfo){
+                if(node.isVisibleToUser && node.isClickable){
+                    val bounds=android.graphics.Rect();node.getBoundsInScreen(bounds)
+                    val name=(node.contentDescription?.toString().orEmpty()+" "+node.viewIdResourceName.orEmpty()).lowercase()
+                    if(name.contains("close") || (bounds.centerX()<titleBounds.left && kotlin.math.abs(bounds.centerY()-titleBounds.centerY())<titleBounds.height()))close=node
+                }
+                for(i in 0 until node.childCount)node.getChild(i)?.let{scan(it)}
+            }
+            scan(root)
+            check(close?.performAction(android.view.accessibility.AccessibilityNodeInfo.ACTION_CLICK)==true){"Could not close VLC's first-run tutorial"}
+            shell("input keyevent 126") // Resume after the tutorial, as a user would.
+            return true
+        }
+        fun settleVlc(){repeat(6){Thread.sleep(250);dismissVlcTips()};waitFor("VLC did not resume after tutorial",5000){vlcPlaying()}}
         fun screenshot(name:String){ins.uiAutomation.takeScreenshot()?.let{bitmap->File(screenshots,name).outputStream().use{bitmap.compress(Bitmap.CompressFormat.PNG,100,it)};bitmap.recycle()}}
         fun chooseVlc(index:Int){
             assertEquals("true",js("__sourceTest.focus($index);true"))
@@ -64,13 +83,15 @@ class VlcHandoffTest {
                 ins.runOnMainSync{act.webView.loadDataWithBaseURL("file:///android_asset/web/","<body><script>$bootstrap</script><script>$bundle</script>","text/html","utf-8",null);act.webView.requestFocus()}
                 waitFor("Source fixture failed to load"){js("!!window.__sourceTest && __sourceTest.ready()")=="true"}
                 chooseVlc(0)
-                waitFor("Installed VLC did not play the direct video",30000){vlcPlaying() && fixture.videoRequests.get()>0}
+                waitFor("Installed VLC did not play the direct video",30000){dismissVlcTips();vlcPlaying() && fixture.videoRequests.get()>0}
+                settleVlc()
                 Thread.sleep(1400);assertTrue("Direct playback stopped immediately",vlcPlaying());screenshot("vlc-direct-video.png")
                 shell("am force-stop org.videolan.vlc")
                 waitFor("Lumen did not return after VLC"){shell("dumpsys activity activities").lineSequence().any{it.contains("mResumedActivity")&&it.contains("tv.lumen.app")}}
                 ins.runOnMainSync{act.webView.requestFocus()}
                 chooseVlc(1)
-                waitFor("Installed VLC did not play the tracker-discovered torrent",70000){vlcPlaying() && (TorrentRuntime.current?.bytesServed?.get()?:0)>1024}
+                waitFor("Installed VLC did not play the tracker-discovered torrent",70000){dismissVlcTips();vlcPlaying() && (TorrentRuntime.current?.bytesServed?.get()?:0)>1024}
+                settleVlc()
                 assertTrue("Tracker discovery was bypassed",fixture.trackerRequests.get()>0)
                 // Single-task players can report an empty cancellation as they open.
                 ins.runOnMainSync {
@@ -88,7 +109,7 @@ class VlcHandoffTest {
                 screenshot("vlc-torrent-video.png")
                 File(screenshots,"verified.txt").writeText("Installed VLC direct playback: PASS\nTracker-only peer discovery: PASS\nNative bridge torrent playback while Lumen is backgrounded: PASS\nEmpty activity result keeps stream available: PASS\n"+shell("dumpsys media_session"))
             } finally {
-                screenshot("final-state.png");shell("am force-stop org.videolan.vlc");TorrentRuntime.stop(context)
+                File(screenshots,"final-media-session.txt").writeText(shell("dumpsys media_session"));File(screenshots,"final-activities.txt").writeText(shell("dumpsys activity activities"));screenshot("final-state.png");shell("am force-stop org.videolan.vlc");TorrentRuntime.stop(context)
                 ins.runOnMainSync{act.finish()}
             }
         }

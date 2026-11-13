@@ -3,3 +3,6 @@
 # their public ABI for testVariant=release. Normal published APKs omit this file.
 -keep class kotlin.** { *; }
 -keep class androidx.tracing.** { *; }
+
+# Legacy artwork-cache entry points are invoked directly by the regression test.
+-keep class tv.lumen.app.Thumbs { public *; }
