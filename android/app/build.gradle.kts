@@ -14,6 +14,7 @@ android {
     defaultConfig {
         applicationId = "tv.lumen.app"
         testInstrumentationRunner = "androidx.test.runner.AndroidJUnitRunner"
+        testProguardFiles("test-proguard-rules.pro")
         minSdk = 22          // Fire OS 5 / Android 5.1 and newer
         targetSdk = 34
         // GitHub sets BUILD_NUMBER to the build count, so every build is a newer version.
@@ -63,7 +64,7 @@ android {
 dependencies {
     androidTestImplementation("androidx.test:runner:1.6.2")
     androidTestImplementation("androidx.test.ext:junit:1.2.1")
-    androidTestImplementation("com.google.errorprone:error_prone_annotations:2.28.0")
+    androidTestCompileOnly("com.google.errorprone:error_prone_annotations:2.28.0")
     val torrentVersion = "2.0.15.3"
     implementation("com.frostwire:jlibtorrent:$torrentVersion")
     val nativeArtifact=mapOf("armeabi-v7a" to "arm","arm64-v8a" to "arm64","x86_64" to "x86_64").getValue(torrentAbi)
