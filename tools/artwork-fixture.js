@@ -3,7 +3,7 @@ import { poster, logo, artworkImage } from '../web/src/ui.js';
 const src = window.__imageBase + '/image';
 // Force the older-engine condition even in current browser CI.
 const compatibility = document.createElement('style');
-compatibility.textContent = '*{aspect-ratio:auto!important} #fixture{display:flex;flex-wrap:wrap} #fixture>div{margin:12px}';
+compatibility.textContent = '*{aspect-ratio:auto!important} #fixture{display:flex;flex-wrap:wrap;height:100%;overflow-y:auto;align-content:flex-start} #fixture>div{margin:12px}';
 document.head.appendChild(compatibility);
 document.body.innerHTML = '<div id="fixture">' +
   '<div id="poster-case" style="width:204px">' + poster({name:'Film poster',img:src}) + '</div>' +
@@ -18,8 +18,13 @@ document.body.innerHTML = '<div id="fixture">' +
 // insertion observer must discover both film and series artwork on its own.
 for (const image of document.querySelectorAll('img[data-artwork-state="waiting"]')) image.removeAttribute('onload');
 window.__imageResult = () => {
+  // The emulator viewport is smaller than the desktop one. Visit every card
+  // through the real scroll container rather than requiring offscreen downloads.
+  const pending = document.querySelector('img[data-artwork-state="waiting"]');
+  if (pending) pending.scrollIntoView({block:'center'});
   const images = ['poster-case','series-case','compact-case','search-case','landscape-case','logo-case','banner-case'].map(id=>document.querySelector('#'+id+' img'));
   return {
+    states: Array.from(document.querySelectorAll('img'),i=>({state:i.dataset.artworkState,native:i.src.startsWith('data:image/jpeg;base64,'),width:i.getBoundingClientRect().width,height:i.getBoundingClientRect().height})),
     layout: ['poster-case','series-case','compact-case','search-case','landscape-case','missing-case'].every(id=>{
       const art=document.querySelector('#'+id+' .art'), r=art.getBoundingClientRect();
       const ratio=id==='landscape-case'?9/16:3/2;
