@@ -62,7 +62,8 @@ class ArtworkBridgeTest {
             val launched = instrumentation.startActivitySync(Intent(context, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
             activity = launched
             val bundle = instrumentation.context.assets.open("artwork-ui.js").bufferedReader().use { it.readText() }
-            val html = "<!doctype html><meta charset='utf-8'><style>img{max-width:100%;max-height:200px}</style><body><script>window.__imageBase=${JSONObject.quote(base)};</script><script>$bundle</script>"
+            val css = context.assets.open("web/app.css").bufferedReader().use { it.readText() }
+            val html = "<!doctype html><meta charset='utf-8'><style>$css</style><body><script>window.__imageBase=${JSONObject.quote(base)};</script><script>$bundle</script>"
             instrumentation.runOnMainSync { launched.webView.loadDataWithBaseURL("file:///android_asset/web/", html, "text/html", "utf-8", null) }
             val deadline = System.currentTimeMillis() + 45000
             var last = ""
@@ -73,11 +74,11 @@ class ArtworkBridgeTest {
                 val decoded = org.json.JSONTokener(last).nextValue() as? String
                 if (!decoded.isNullOrEmpty()) {
                     val result = JSONObject(decoded)
-                    if (result.optBoolean("loaded") && result.optBoolean("native") && result.optBoolean("missing")) return
+                    if (result.optBoolean("layout") && result.optBoolean("loaded") && result.optBoolean("native") && result.optBoolean("missing")) return
                 }
                 Thread.sleep(100)
             }
-            fail("Native JPEGs must decode in Android WebView; missing artwork must retain title. Last state: $last")
+            fail("Poster cards and decoded images must have visible dimensions without aspect-ratio support; missing artwork must retain title. Last state: $last")
         } finally {
             activity?.let { a -> instrumentation.runOnMainSync { a.finish() } }
             cache.deleteRecursively(); server.close(); serving.join(1000)

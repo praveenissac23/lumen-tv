@@ -146,7 +146,7 @@ try:
     """
     (ROOT/'build/web/artwork-fixture.html').write_text('<!doctype html><meta charset="utf-8"><link rel="stylesheet" href="app.css"><body><script>'+native_mock+'</script><script>'+fixture+'</script>')
     page.goto(f'http://127.0.0.1:{server.server_port}/artwork-fixture.html')
-    page.wait_for_function('window.__imageResult && __imageResult().loaded && __imageResult().native && __imageResult().missing')
+    page.wait_for_function('window.__imageResult && __imageResult().layout && __imageResult().loaded && __imageResult().native && __imageResult().missing')
     assert not errors, errors
     page.screenshot(path=str(out/'native-artwork.png'))
     browser.close()

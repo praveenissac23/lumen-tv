@@ -145,7 +145,7 @@ export function poster(item, landscape = false) {
   const img = artworkImage(item.img, landscape ? 960 : 320);
   const words = item.name.split(' ');
   return `<span class="art ${landscape ? 'land' : ''}" style="--la:${t.a};--lb:${t.b};--li:${t.ink}">
-    <span class="art-title">${esc(words.length > 4 ? words.slice(0, 4).join(' ') + '…' : item.name)}</span>${img}</span>`;
+    <span class="art-size" aria-hidden="true"></span><span class="art-title">${esc(words.length > 4 ? words.slice(0, 4).join(' ') + '…' : item.name)}</span>${img}</span>`;
 }
 
 // ---------- now/next slots ----------

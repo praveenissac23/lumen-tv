@@ -73,11 +73,11 @@ export class HomeScreen {
           const lang = langById(id);
           if (!lang) continue;
           const parts = langRowsFor(id);
-          if (parts.includes('films')) this.langVodRows(rows, 'movie', id, lang, n);
           if (parts.includes('live')) {
             const ch = cap(langItems('live', id).filter(ok('live')), n);
             if (ch.length) rows.push({ key: 'll-' + id, title: `${lang.name} channels`, kind: 'live', items: ch, more: { screen: 'live', lang: id } });
           }
+          if (parts.includes('films')) this.langVodRows(rows, 'movie', id, lang, n);
           if (parts.includes('series')) this.langVodRows(rows, 'series', id, lang, n);
         }
       } else if (sec.id === 'pins') {

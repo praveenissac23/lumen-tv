@@ -3,7 +3,7 @@ const { test, after } = require('node:test');
 const assert = require('node:assert/strict');
 const { JSDOM } = require('jsdom');
 const esbuild = require('esbuild');
-const bundle = esbuild.buildSync({ stdin: { contents: `import * as nav from './web/src/nav.js'; import * as ui from './web/src/ui.js'; import * as torrents from './web/src/torrents.js'; import * as store from './web/src/store.js'; import * as updates from './web/src/updates.js'; import {SearchScreen} from './web/src/screens/searchview.js'; import {TorrentDetailScreen} from './web/src/screens/torrentdetail.js'; import {SettingsScreen} from './web/src/screens/settings.js'; window.testAPI={nav,ui,torrents,store,updates,SearchScreen,TorrentDetailScreen,SettingsScreen};`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
+const bundle = esbuild.buildSync({ stdin: { contents: `import * as nav from './web/src/nav.js'; import * as ui from './web/src/ui.js'; import * as torrents from './web/src/torrents.js'; import * as store from './web/src/store.js'; import * as updates from './web/src/updates.js'; import {SearchScreen} from './web/src/screens/searchview.js'; import {TorrentDetailScreen} from './web/src/screens/torrentdetail.js'; import {SettingsScreen} from './web/src/screens/settings.js'; import {HomeScreen} from './web/src/screens/home.js'; import {C} from './web/src/data.js'; window.testAPI={nav,ui,torrents,store,updates,SearchScreen,TorrentDetailScreen,SettingsScreen,HomeScreen,C};`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
 const windows = [];
 const runtimeErrors = [];
 function setup(handler = async () => ({}), seed = {}, imageHandler, engineHandler, deviceInfo={}, configureWindow) {
@@ -451,4 +451,24 @@ test('inserted posters start without IntersectionObserver or placeholder load ev
  x.view.innerHTML=x.ui.poster({name:'Film',img:'https://images.test/poster.jpg'});
  await delay(30);assert.equal(x.view.querySelector('img').src,data);
  assert.equal(x.calls.filter(c=>c.artwork).length,1);
+});
+
+test('saved Malayalam home preference shows channels before 2026 and 2025 film rows',()=>{
+ const x=setup(undefined,{myLangs:['malayalam'],langRows:{malayalam:['films','live']}});
+ const c=x.C;c.updatedAt=731;
+ c.cats.live=[{id:'ml',name:'MALAYALAM'}];
+ c.cats.movie=[{id:'25',name:'MALAYALAM (2025)'},{id:'26',name:'MALAYALAM (2026)'}];
+ c.live=[{id:'c1',name:'Malayalam channel',cat:'ml'}];
+ c.movie=[{id:'f25',name:'Film 2025',cat:'25'},{id:'f26',name:'Film 2026',cat:'26'}];
+ const home=Object.create(x.HomeScreen.prototype);
+ const rows=home.rows();
+ assert.deepEqual(Array.from(rows,r=>r.title),['Malayalam channels','MALAYALAM (2026)','MALAYALAM (2025)']);
+ assert.equal(rows[0].items[0].id,'c1');
+ x.store.flush();
+ const restored=JSON.parse(x.disk.get('state'));
+ assert.deepEqual(restored.langRows.malayalam,['films','live']);
+ assert.equal(restored.langPrefs,undefined);
+ // Respect a deliberate channels-off selection rather than forcing it back on.
+ x.store.setLangRows('malayalam',['films']);
+ assert.deepEqual(Array.from(home.rows(),r=>r.title),['MALAYALAM (2026)','MALAYALAM (2025)']);
 });
