@@ -77,8 +77,7 @@ class VlcHandoffTest {
         fun chooseVlc(index:Int){
             assertEquals("true",js("__sourceTest.focus($index);true"))
             ins.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER)
-            waitFor("OK did not open source actions"){js("__sourceTest.state().menus===1")=="true"}
-            ins.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER)
+            assertEquals("One OK must not open an action menu","true",js("__sourceTest.state().menus===0"))
         }
         TorrentVlcFixture(context).use { fixture ->
             try {
@@ -108,10 +107,12 @@ class VlcHandoffTest {
                 // Single-task players can report an empty cancellation as they open.
                 ins.runOnMainSync {
                     val callback=MainActivity::class.java.getDeclaredMethod("onActivityResult",Int::class.javaPrimitiveType,Int::class.javaPrimitiveType,Intent::class.java)
-                    callback.isAccessible=true;callback.invoke(act,MainActivity.REQ_EXT,Activity.RESULT_CANCELED,null)
+                    callback.isAccessible=true
+                    callback.invoke(act,MainActivity.REQ_EXT,Activity.RESULT_CANCELED,Intent(Intent.ACTION_VIEW).putExtra("position",0L).putExtra("title","Echoed request"))
+                    callback.invoke(act,MainActivity.REQ_EXT,Activity.RESULT_CANCELED,null)
                 }
                 Thread.sleep(1400)
-                assertNotNull("Empty activity result killed the torrent engine",TorrentRuntime.current)
+                assertNotNull("Startup cancellation killed the torrent engine",TorrentRuntime.current)
                 assertTrue("VLC stopped while Lumen handled an empty result",vlcPlaying())
                 val handoff=org.json.JSONTokener(js("JSON.stringify(__handoffs[1])")).nextValue() as String
                 val url=JSONObject(handoff).getString("url")
@@ -119,7 +120,7 @@ class VlcHandoffTest {
                 request.setRequestProperty("Range","bytes=0-1023");request.readTimeout=5000
                 try{assertEquals(206,request.responseCode);assertEquals(1024,request.inputStream.use{it.readBytes()}.size)}finally{request.disconnect()}
                 screenshot("vlc-torrent-video.png")
-                File(screenshots,"verified.txt").writeText("Installed VLC direct playback: PASS\nTracker-only peer discovery: PASS\nNative bridge torrent playback while Lumen is backgrounded: PASS\nEmpty activity result keeps stream available: PASS\n"+shell("dumpsys media_session"))
+                File(screenshots,"verified.txt").writeText("Installed VLC direct playback: PASS\nTracker-only peer discovery: PASS\nNative bridge torrent playback while Lumen is backgrounded: PASS\nEmpty and echoed-request activity results keep stream available: PASS\n"+shell("dumpsys media_session"))
             } finally {
                 File(screenshots,"final-media-session.txt").writeText(shell("dumpsys media_session"));File(screenshots,"final-activities.txt").writeText(shell("dumpsys activity activities"));screenshot("final-state.png");shell("am force-stop org.videolan.vlc");TorrentRuntime.stop(context)
                 ins.runOnMainSync{act.finish()}

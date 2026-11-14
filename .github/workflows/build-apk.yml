@@ -148,4 +148,7 @@ jobs:
           gh release upload "build-${{ github.run_number }}" build/apks/app-arm64.apk
           cp build/apks/app-release.apk build/apks/0-fire-cube.apk
           gh release upload "build-${{ github.run_number }}" build/apks/0-fire-cube.apk
+          if [ -f build/vlc-shots/vlc-tests/vlc-direct-video.png ] && [ -f build/vlc-shots/vlc-tests/vlc-torrent-video.png ]; then
+            gh release upload "build-${{ github.run_number }}" build/vlc-shots/vlc-tests/vlc-direct-video.png build/vlc-shots/vlc-tests/vlc-torrent-video.png
+          fi
           gh release edit "build-${{ github.run_number }}" --draft=false --latest

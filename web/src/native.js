@@ -227,8 +227,8 @@ export function installedApps() {
   return KNOWN_APPS.filter((a) => ['com.dv.adm', 'idm.internet.download.manager', 'org.videolan.vlc', 'com.mxtech.videoplayer.ad'].includes(a.pkg));
 }
 // mode: 'play' | 'download'; pkg '' opens Android's app chooser
-export function openWith(pkg, url, { title = '', file = '', mode = 'play', position = 0 } = {}) {
-  if (N) return N.openWith(pkg, url, JSON.stringify({ title, file, mode, position }));
+export function openWith(pkg, url, { title = '', file = '', mode = 'play', position = 0, torrent = false } = {}) {
+  if (N) return N.openWith(pkg, url, JSON.stringify({ title, file, mode, position, ...(torrent?{torrent:true}:{}) }));
   window.open(url, '_blank');
   return true;
 }

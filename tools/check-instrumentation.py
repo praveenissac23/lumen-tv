@@ -7,7 +7,7 @@ path = pathlib.Path(sys.argv[1])
 output = path.read_text()
 expected = {
     ("tv.lumen.app.ArtworkBridgeTest", "jpegArtworkReachesRealWebViewAndBadCacheRecovers"),
-    ("tv.lumen.app.SourceRemoteTest", "dpadCenterAndMenuOpenTheSameSourceActions"),
+    ("tv.lumen.app.SourceRemoteTest", "shortOkPlaysVlcAndMenuOrHoldShowsSourceActions"),
     ("tv.lumen.app.TorrentEngineTest", "localPeerTorrentProducesSeekablePlayableVideoWithoutDebrid"),
     ("tv.lumen.app.VlcHandoffTest", "actualVlcPlaysDirectAndTrackerDiscoveredTorrentAndSurvivesEmptyActivityResult"),
 }

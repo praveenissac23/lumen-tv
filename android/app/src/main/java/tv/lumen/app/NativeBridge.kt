@@ -354,8 +354,12 @@ class NativeBridge(private val act: MainActivity) {
             }
         }
         // Download managers register for plain links; players for video types. Try both, then share as text.
-        val candidates = if (magnet) listOf(base(null), base("application/x-bittorrent")) else if (download) listOf(base(null), base("video/*"), base("application/octet-stream"))
-                         else listOf(base("video/*"), base(null))
+        val directVlc = if(o.optBoolean("torrent") && !download && !magnet && pkg=="org.videolan.vlc") {
+            val video=base("video/*").setClassName(pkg,"org.videolan.vlc.gui.video.VideoPlayerActivity").putExtra("from_external",true)
+            try { if(pm.getActivityInfo(video.component!!,0).exported) listOf(video) else emptyList() } catch(_:PackageManager.NameNotFoundException){emptyList()}
+        }else emptyList()
+        val candidates = directVlc + (if (magnet) listOf(base(null), base("application/x-bittorrent")) else if (download) listOf(base(null), base("video/*"), base("application/octet-stream"))
+                         else listOf(base("video/*"), base(null)))
         val send = Intent(Intent.ACTION_SEND).apply {
             type = "text/plain"; putExtra(Intent.EXTRA_TEXT, url); putExtra(Intent.EXTRA_SUBJECT, file.ifEmpty { title })
             if (pkg.isNotEmpty()) setPackage(pkg); addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
@@ -487,7 +491,7 @@ class NativeBridge(private val act: MainActivity) {
         // VLC is singleTask; Android can return an empty cancellation while its
         // real player is still opening. Only a documented player result can end
         // a local stream. Idle cleanup/Stop still handles players with no result.
-        if(externalTorrent && (x==null || !(x.containsKey("extra_position") || x.containsKey("position") || x.containsKey("end_by")))) return
+        if(externalTorrent && data?.action!="org.videolan.vlc.player.result" && x?.containsKey("end_by")!=true) return
         var pos = -1L; var dur = 0L
         if (x != null) {
             pos = when {

@@ -143,7 +143,7 @@ export async function findSources(type, id, { refresh = false } = {}) {
     const sources = normaliseSources(results.reduce((all, p) => all.concat(p.streams), []));
     sources.sourceErrors = errors;
     const count = sources.filter((s) => s.sourceType === 'internet').length;
-    sources.sourceSummary = `${count} internet torrents${sources.length > count ? ` · ${sources.length - count} additional sources` : ''}. Press OK on a source for playback and other actions.`;
+    sources.sourceSummary = `${count} internet torrents${sources.length > count ? ` · ${sources.length - count} additional sources` : ''}. Press OK to play in VLC. Hold OK or press Menu for options.`;
     if (errors.length) sources.sourceSummary += ' Unavailable: ' + errors.join(', ') + '.';
     return sources;
   });

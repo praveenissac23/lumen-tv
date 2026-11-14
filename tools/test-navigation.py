@@ -105,21 +105,18 @@ try:
     page.keyboard.press('Escape')
     page.wait_for_selector('.sheet-wrap',state='detached')
     focused()
-    # A short OK opens the in-app actions, not Android's Open With chooser.
-    page.evaluate("window.__plays=[];__app.current().ctl.launch=function(download){window.__plays.push({index:this.index,download})};true")
+    # A short OK starts VLC directly; menus remain on hold/Menu/Right.
+    page.evaluate("window.__plays=[];__app.current().ctl.launch=function(download,options){window.__plays.push({index:this.index,download,pkg:options.pkg})};true")
     page.locator('[data-source="0"]').focus()
     page.keyboard.press('Enter')
-    page.wait_for_selector('.sheet-wrap')
-    assert page.evaluate('__plays.length')==0
-    assert 'Play in VLC' in page.locator('.sheet').inner_text()
-    page.locator('.sheet-item').filter(has_text='Play in VLC').click()
-    assert page.evaluate('JSON.stringify(__plays)')=='[{"index":0,"download":false}]'
+    assert page.locator('.sheet-wrap').count()==0
+    assert page.evaluate('__plays')==[{'index':0,'download':False,'pkg':'org.videolan.vlc'}]
     for _ in range(12):
         page.keyboard.press('ArrowDown'); focused()
     assert page.evaluate('document.activeElement.hasAttribute("data-source")')
-    page.keyboard.press('Enter'); page.wait_for_selector('.sheet-wrap')
+    page.keyboard.press('ContextMenu'); page.wait_for_selector('.sheet-wrap')
     assert 'Upload to AllDebrid' in page.locator('.sheet').inner_text()
-    page.screenshot(path=str(ROOT/'build/navigation-shots/source-ok-menu.png'))
+    page.screenshot(path=str(ROOT/'build/navigation-shots/source-more-options.png'))
     page.keyboard.press('Escape'); focused()
     page.keyboard.press('Escape')
     page.wait_for_selector('[data-torrent="0"]')

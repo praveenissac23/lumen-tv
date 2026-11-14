@@ -78,3 +78,9 @@ Build 60's 10,852,134-byte universal APK contained 4,163,597 compressed bytes of
 Add-on tracker URLs now survive source normalization, magnet creation and metadata-only handle removal. An empty Android player result no longer stops an active local stream: a recognized player result, Stop, cancellation or idle cleanup controls its lifetime. Source failures are also shown as visible error toasts.
 
 The release gate now installs checksum-pinned official VLC 3.6.5 in the emulator and exercises the minified release APK. It requires direct-video playback, tracker-only torrent peer discovery, playback through the actual Native bridge while Lumen is backgrounded, and a stream that survives an empty activity result. The existing HTTP range/video-frame checks, artwork test and remote input test remain. Physical Fire Cube and live subscriber accounts are outside this automated test environment.
+
+### Single-press VLC playback
+
+A short OK/click on a source now starts VLC directly. Hold OK, Menu or Right opens source-specific alternatives. Primary movie playback selects the largest non-sample video when the source does not provide a file index; requested-episode matching remains protected. Repeated clicks during preparation do not change or launch a second source.
+
+Torrent playback prefers VLC's exported VideoPlayerActivity, with its existing launcher as a fallback. IPTV handoffs retain their existing route. An echoed request containing a position is not accepted as a completed player result and cannot terminate the local torrent stream. Android tests now require one DPAD_CENTER press to play both direct video and a real tracker-discovered torrent through installed VLC.

@@ -14,7 +14,7 @@ import java.util.concurrent.TimeUnit
 
 @RunWith(AndroidJUnit4::class)
 class SourceRemoteTest {
-    @Test fun dpadCenterAndMenuOpenTheSameSourceActions() {
+    @Test fun shortOkPlaysVlcAndMenuOrHoldShowsSourceActions() {
         val ins=InstrumentationRegistry.getInstrumentation()
         val act=ins.startActivitySync(Intent(ins.targetContext,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
         fun js(expression:String):String {
@@ -35,15 +35,15 @@ class SourceRemoteTest {
             ins.runOnMainSync { act.webView.loadDataWithBaseURL("file:///android_asset/web/",html,"text/html","utf-8",null);act.webView.requestFocus() }
             waitFor("!!window.__sourceTest && __sourceTest.ready()")
             js("__sourceTest.focus(1);true")
-            ins.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER)
+            ins.sendKeyDownUpSync(KeyEvent.KEYCODE_MENU)
             waitFor("__sourceTest.state().menus===1")
             val menu=state();assertTrue(menu.getString("menu").contains("Play in VLC"));assertTrue(menu.getString("menu").contains("Upload to AllDebrid"));assertTrue(menu.getString("menu").contains("Download using"));assertEquals(0,menu.getInt("handoffs"));assertEquals(0,menu.getInt("topControls"))
             ins.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);waitFor("__sourceTest.state().menus===0")
-            ins.sendKeyDownUpSync(KeyEvent.KEYCODE_MENU);waitFor("__sourceTest.state().menus===1")
+            ins.sendKeySync(KeyEvent(KeyEvent.ACTION_DOWN,KeyEvent.KEYCODE_DPAD_CENTER));Thread.sleep(750);ins.sendKeySync(KeyEvent(KeyEvent.ACTION_UP,KeyEvent.KEYCODE_DPAD_CENTER));waitFor("__sourceTest.state().menus===1")
             assertEquals(menu.getString("menu"),state().getString("menu"))
             ins.sendKeyDownUpSync(KeyEvent.KEYCODE_BACK);waitFor("__sourceTest.state().menus===0")
-            js("__sourceTest.focus(0);true");ins.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER);waitFor("__sourceTest.state().menus===1")
-            ins.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER);waitFor("__sourceTest.state().handoffs===1")
+            js("__sourceTest.focus(0);true");ins.sendKeyDownUpSync(KeyEvent.KEYCODE_DPAD_CENTER);waitFor("__sourceTest.state().handoffs===1")
+            assertEquals(0,state().getInt("menus"))
             assertTrue(js("__handoffs[0].pkg==='org.videolan.vlc'")=="true")
         }finally{ins.runOnMainSync{act.finish()}}
     }

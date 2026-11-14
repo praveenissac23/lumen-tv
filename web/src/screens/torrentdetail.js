@@ -19,7 +19,7 @@ export class TorrentDetailScreen {
       <aside class="td-info">${poster(item)}<h1>${esc(item.name)}</h1><p>${esc(item.year)} · ${item.type === 'series' ? 'Series' : 'Film'}</p><p id="td-description"></p>
         <button class="f btn" id="td-settings">${icon('gear')}Torrent settings</button></aside>
       <section class="td-main"><div class="td-heading"><h1 id="td-heading">${item.type === 'series' ? 'Choose an episode' : 'Choose a source'}</h1></div>
-        <p class="td-play-hint">Select a source and press OK for playback, downloads and Debrid actions.</p>
+        <p class="td-play-hint">Press OK on a source to play in VLC. Hold OK or press Menu for more options.</p>
         <div id="td-seasons" class="chips" data-group="tdseasons"></div>
         <div class="td-scroll" data-scroll="y" data-pad="14"><div id="td-list" class="td-list" data-group="tdlist"><p class="st-intro">Loading…</p></div></div>
         <p id="td-status" class="td-status" role="status"></p>
@@ -104,7 +104,7 @@ export class TorrentDetailScreen {
       this.index = Math.min(this.index, Math.max(0, sources.length - 1));
       const rows = sources.map((s, i) => {
         const via = this.sourceProvider(s); const ready = !!s.readyProviders?.length;
-        return `<button class="f td-source ${ready ? 'td-debrid' : ''} ${i === this.index ? 'selected' : ''}" data-source="${i}"><b>${s.quality ? s.quality + 'p' : 'Quality unknown'} <span class="td-route ${ready ? 'td-route-debrid' : 'td-route-external'}">${icon(ready ? 'check' : s.url ? 'play' : 'globe')}<span data-route>${esc(this.routeLabel(s))}</span></span></b><span>${esc(s.text)}</span><small>${[esc(s.sourceLabel), s.size ? bytes(s.size) : '', s.seeds != null ? s.seeds.toLocaleString() + ' seeds' : ''].filter(Boolean).join(' · ')}</small><span class="td-row-play">${icon('play')}OK · Source options</span></button>`;
+        return `<button class="f td-source ${ready ? 'td-debrid' : ''} ${i === this.index ? 'selected' : ''}" data-source="${i}"><b>${s.quality ? s.quality + 'p' : 'Quality unknown'} <span class="td-route ${ready ? 'td-route-debrid' : 'td-route-external'}">${icon(ready ? 'check' : s.url ? 'play' : 'globe')}<span data-route>${esc(this.routeLabel(s))}</span></span></b><span>${esc(s.text)}</span><small>${[esc(s.sourceLabel), s.size ? bytes(s.size) : '', s.seeds != null ? s.seeds.toLocaleString() + ' seeds' : ''].filter(Boolean).join(' · ')}</small><span class="td-row-play">${icon('play')}OK · Play in VLC</span></button>`;
       }).join('');
       this.list((rows || '<p class="st-intro">No supported internet torrents were found for this title. Try another source or your IPTV library.</p>') + '<button class="f btn" data-retry>Search sources again</button>', move);
 
@@ -137,7 +137,8 @@ export class TorrentDetailScreen {
   activateSource(button) {
     const index = +button.dataset.source;
     if (!Number.isInteger(index) || !this.sources?.[index]) return;
-    this.index = index; this.markSelection(); this.sourceOptions(button);
+    if(this.busy) return;
+    this.index = index; this.markSelection(); this.launch(false,{pkg:'org.videolan.vlc',autoFile:true});
   }
   refreshRoutes() {
     this.view.querySelectorAll('[data-source]').forEach(button => {
@@ -146,7 +147,7 @@ export class TorrentDetailScreen {
       button.querySelector('.td-route').classList.toggle('td-route-debrid',ready);
       button.querySelector('.td-route').classList.toggle('td-route-external',!ready);
       button.querySelector('[data-route]').textContent=this.routeLabel(source);
-      button.querySelector('.td-row-play').innerHTML=icon('list') + 'OK · Source options';
+      button.querySelector('.td-row-play').innerHTML=icon('list') + 'OK · Play in VLC';
     });
   }
   async sourceOptions(row) {
@@ -186,13 +187,13 @@ export class TorrentDetailScreen {
   }
   markSelection() { this.view.querySelectorAll('[data-source]').forEach((b) => b.classList.toggle('selected', +b.dataset.source === this.index)); }
   clearPending() {
-    this.view.querySelectorAll('[aria-busy="true"]').forEach(row=>{row.removeAttribute('aria-busy');row.querySelector('.td-row-play').innerHTML=icon('list')+'OK · Source options';});
+    this.view.querySelectorAll('[aria-busy="true"]').forEach(row=>{row.removeAttribute('aria-busy');row.querySelector('.td-row-play').innerHTML=icon('list')+'OK · Play in VLC';});
   }
-  async launch(download, {pkg=null,prepareProvider=null} = {}) {
+  async launch(download, {pkg=null,prepareProvider=null,autoFile=false} = {}) {
     if (this.busy || !this.sources?.length || this.dead) return;
     this.busy = true;
     const pendingRow=this.view.querySelector(`[data-source="${this.index}"]`);
-    if(pendingRow){pendingRow.setAttribute('aria-busy','true');pendingRow.querySelector('.td-row-play').textContent='Starting playback… Press OK for options';}
+    if(pendingRow){pendingRow.setAttribute('aria-busy','true');pendingRow.querySelector('.td-row-play').textContent='Starting VLC… Hold OK or press Menu for options';}
     const action = ++this.actionToken;
     const token = this.token, stream = this.sources[this.index];
     const alive = () => !this.dead && token === this.token && action === this.actionToken;
@@ -200,6 +201,7 @@ export class TorrentDetailScreen {
     try {
       const result = await (prepareProvider ? prepareDebrid : resolvePlayable)(stream, prepareProvider || this.provider || preferredProvider(), this.episode, async (files) => {
         if (!alive()) return null;
+        if(autoFile && !this.episode) return files.reduce((best,file)=>(+file.size||0)>(+best.size||0)?file:best,files[0]);
         const value = await sheet({ title: 'Choose the video file', options: files.slice(0, 200).map((f, i) => ({ label: f.name, hint: f.size ? bytes(f.size) : '', value: String(i) })) });
         return alive() && value != null ? files[+value] : null;
       }, alive);
@@ -215,7 +217,7 @@ export class TorrentDetailScreen {
         this.openMagnet(stream,magnetPkg); return;
       }
       if (pkg!=null) {
-        const ok=N.openWith(pkg,result.url,{title:this.item.name,file:result.file||safeFile(this.item.name)+'.mp4',mode:download?'download':'play'});
+        const ok=N.openWith(pkg,result.url,{title:this.item.name,file:result.file||safeFile(this.item.name)+'.mp4',mode:download?'download':'play',torrent:!download});
         if(ok===false) {const message='The selected app could not open this video link. Check that it is installed.';this.status(message);toast(message,'err');}
         else this.status('Opening '+(download?'download manager':'player')+'…'); return;
       }
@@ -236,8 +238,8 @@ export class TorrentDetailScreen {
     const row = document.activeElement?.closest('[data-source]');
     if (row && this.view.contains(row)) {
       if (k === 'hold' || k === 'menu') { this.sourceOptions(row); return true; }
-      if (k === 'ok' || k === 'right') { this.sourceOptions(row); return true; }
-      if (k === 'play' || k === 'playpause') { this.index=+row.dataset.source; this.launch(false); return true; }
+      if (k === 'ok' || k === 'play' || k === 'playpause') { this.activateSource(row); return true; }
+      if (k === 'right') { this.sourceOptions(row); return true; }
     }
     if (k === 'back' && this.episode && this.item.type === 'series' && this.phase === 'sources') {
       if(this.busy)N.torrentCancel();
