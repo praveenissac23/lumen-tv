@@ -83,25 +83,42 @@ export function resolveArtwork(url, w) {
   return imageJobs.get(key);
 }
 function loadImage(image) {
-  if (!image.isConnected || image.dataset.artworkState !== 'waiting') return;
+  if (!imageAttached(image) || image.dataset.artworkState !== 'waiting') return;
   image.dataset.artworkState = 'loading';
   resolveArtwork(image.dataset.original, +image.dataset.artworkWidth).then((src) => {
-    if (!image.isConnected) return;
+    if (!imageAttached(image)) return;
     image.onload = () => { image.dataset.artworkState = 'loaded'; };
     image.src = src;
   });
 }
+// Older box WebViews expose IntersectionObserver without isIntersecting, and
+// some never fire load for a data-URI placeholder. Discover inserted images
+// independently of that event, while still fetching only near the viewport.
+function imageAttached(image) { return document.documentElement.contains(image); }
 const observedImages = new Set();
 const imageObserver = typeof IntersectionObserver !== 'undefined' ? new IntersectionObserver((entries) => {
-  for (const entry of entries) if (entry.isIntersecting) { imageObserver.unobserve(entry.target); observedImages.delete(entry.target); loadImage(entry.target); }
+  for (const entry of entries) if (entry.isIntersecting || entry.intersectionRatio > 0) {
+    imageObserver.unobserve(entry.target); observedImages.delete(entry.target); loadImage(entry.target);
+  }
 }, { rootMargin: '300px' }) : null;
 window.__lumenLoadImage = (image) => {
-  if (imageObserver) { observedImages.add(image); imageObserver.observe(image); } else loadImage(image);
+  if (image.dataset.artworkState !== 'waiting' || !imageAttached(image)) return;
+  if (imageObserver) {
+    if (!observedImages.has(image)) { observedImages.add(image); imageObserver.observe(image); }
+  } else loadImage(image);
 };
-if (imageObserver) new MutationObserver(() => {
-  for (const image of observedImages) if (!image.isConnected) { imageObserver.unobserve(image); observedImages.delete(image); }
+function discoverImages(node) {
+  if (node.nodeType !== 1) return;
+  if (node.matches('img[data-artwork-state="waiting"]')) window.__lumenLoadImage(node);
+  for (const image of node.querySelectorAll('img[data-artwork-state="waiting"]')) window.__lumenLoadImage(image);
+}
+new MutationObserver((records) => {
+  for (const record of records) for (const node of record.addedNodes) discoverImages(node);
+  for (const image of observedImages) if (!imageAttached(image)) { imageObserver.unobserve(image); observedImages.delete(image); }
 }).observe(document.documentElement, { childList: true, subtree: true });
+discoverImages(document.documentElement);
 window.__lumenImageError = (image) => {
+  if (hasArtworkBridge && image.dataset.artworkState === 'waiting') { window.__lumenLoadImage(image); return; }
   const original = image.dataset.original;
   if (original && image.dataset.imageRetry !== '1' && image.getAttribute('src') !== original) {
     image.dataset.imageRetry = '1'; image.src = original; return;

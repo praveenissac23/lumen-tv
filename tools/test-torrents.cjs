@@ -6,7 +6,7 @@ const esbuild = require('esbuild');
 const bundle = esbuild.buildSync({ stdin: { contents: `import * as nav from './web/src/nav.js'; import * as ui from './web/src/ui.js'; import * as torrents from './web/src/torrents.js'; import * as store from './web/src/store.js'; import * as updates from './web/src/updates.js'; import {SearchScreen} from './web/src/screens/searchview.js'; import {TorrentDetailScreen} from './web/src/screens/torrentdetail.js'; import {SettingsScreen} from './web/src/screens/settings.js'; window.testAPI={nav,ui,torrents,store,updates,SearchScreen,TorrentDetailScreen,SettingsScreen};`, resolveDir: process.cwd() }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
 const windows = [];
 const runtimeErrors = [];
-function setup(handler = async () => ({}), seed = {}, imageHandler, engineHandler, deviceInfo={}) {
+function setup(handler = async () => ({}), seed = {}, imageHandler, engineHandler, deviceInfo={}, configureWindow) {
   const dom = new JSDOM('<!doctype html><div id="stage"><div id="view"></div><div id="overlays"></div><div id="toast"></div></div>', { url: 'https://lumen.test/', runScripts: 'outside-only', pretendToBeVisual: true });
   dom.window.addEventListener('error',e=>{runtimeErrors.push(String(e.error)); e.preventDefault();});
   const w = dom.window, disk = new Map([['state', JSON.stringify(seed)]]), bodies = new Map(), calls = [];
@@ -26,6 +26,7 @@ function setup(handler = async () => ({}), seed = {}, imageHandler, engineHandle
     };
     w.Native.torrentCancel=()=>calls.push({engine:'cancel'});
   }
+  if (configureWindow) configureWindow(w);
   w.eval(bundle); windows.push(w);
   const api = w.testAPI;
   return {...api, w, view:w.document.querySelector('#view'), disk, calls, app:{go(){}, back(){}, reload(){}, openVoice(){}}};
@@ -427,4 +428,27 @@ test('one-click movie playback selects the main video without another chooser',a
  });
  const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(20);x.view.querySelector('[data-source]').click();await delay(30);
  assert.equal(x.w.document.querySelector('.sheet'),null);assert.equal(x.calls.filter(c=>c.handoff).length,1);d.destroy();
+});
+
+test('older box observer entries and missing isConnected still load inserted movie and series posters without placeholder events',async()=>{
+ const data='data:image/jpeg;base64,TEST'; let observeCount=0;
+ const x=setup(undefined,{},async()=>data,undefined,{},w=>{
+   Object.defineProperty(w.Node.prototype,'isConnected',{get:()=>undefined,configurable:true});
+   w.IntersectionObserver=class {
+     constructor(callback){this.callback=callback;}
+     observe(target){observeCount++;setTimeout(()=>this.callback([{target,intersectionRatio:1}]),0);}
+     unobserve(){}
+   };
+ });
+ x.view.innerHTML=x.ui.poster({name:'Movie',img:'https://images.test/movie.jpg'})+x.ui.poster({name:'Series',img:'https://images.test/series.jpg'});
+ // No placeholder load event is delivered on these boxes.
+ await delay(40);
+ assert.equal(observeCount,2);assert.equal(x.calls.filter(c=>c.artwork).length,2);
+ for(const img of x.view.querySelectorAll('img')){assert.equal(img.src,data);img.onload();assert.equal(img.dataset.artworkState,'loaded');}
+});
+test('inserted posters start without IntersectionObserver or placeholder load events',async()=>{
+ const data='data:image/jpeg;base64,TEST';const x=setup(undefined,{},async()=>data);
+ x.view.innerHTML=x.ui.poster({name:'Film',img:'https://images.test/poster.jpg'});
+ await delay(30);assert.equal(x.view.querySelector('img').src,data);
+ assert.equal(x.calls.filter(c=>c.artwork).length,1);
 });
