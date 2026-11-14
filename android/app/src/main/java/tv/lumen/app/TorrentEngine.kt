@@ -33,13 +33,13 @@ class TorrentEngine(private val context: Context, private val discovery: Boolean
     private val server = ServerSocket(0, 8, InetAddress.getByName("127.0.0.1"))
     private var metadata: TorrentInfo? = null
     private var handle: TorrentHandle? = null
-    private var magnet = ""
     private var directory: File? = null
+    @Volatile var progress: (String) -> Unit = {}
     data class Selection(val token: String, val info: TorrentInfo, val handle: TorrentHandle, val file: Int, val path: File, val size: Long, val offset: Long)
 
     init {
         root.listFiles()?.forEach { it.deleteRecursively() }
-        val settings = SettingsPack().connectionsLimit(48).activeDownloads(0).activeSeeds(0).activeLimit(0)
+        val settings = SettingsPack().connectionsLimit(48).activeDownloads(1).activeSeeds(1).activeLimit(2)
             .maxPeerlistSize(200).maxQueuedDiskBytes(2 * 1024 * 1024).downloadRateLimit(16 * 1024 * 1024)
             .listenInterfaces("0.0.0.0:0").uploadRateLimit(64 * 1024)
         settings.setEnableDht(discovery); settings.setEnableLsd(discovery)
@@ -60,24 +60,33 @@ class TorrentEngine(private val context: Context, private val discovery: Boolean
             ?: throw IllegalArgumentException("This torrent link is not supported")
         cancelled=false
         lastUsed = System.currentTimeMillis()
-        if (metadata?.infoHashV1()?.toHex() != hash) {
+        if (metadata?.infoHashV1()?.toHex() != hash || handle?.isValid != true) {
             active = null; clients.forEach { try { it.close() } catch (_: Exception) {} }
             handle?.let { session.remove(it) }; handle = null
             directory?.deleteRecursively()
-            session.download(uri,root,TorrentFlags.UPLOAD_MODE.or_(TorrentFlags.STOP_WHEN_READY))
+            metadata = null
+            directory = File(root,hash).apply { mkdirs() }
+            session.download(uri,directory,TorrentFlags.UPLOAD_MODE)
+            progress("Finding torrent metadata…")
             val deadline=System.currentTimeMillis()+35000
             var candidate: TorrentHandle?=null
             var info: TorrentInfo?=null
+            var reportAt=0L
+            var keep=false
             try {
                 while(!closed && !cancelled && System.currentTimeMillis()<deadline) {
                     candidate=session.find(Sha1Hash(hash))
                     if(candidate!=null && candidate.isValid) {
                         candidate.unsetFlags(TorrentFlags.AUTO_MANAGED);candidate.resume()
+                        if(System.currentTimeMillis()-reportAt>1000) {
+                            progress("Finding metadata · ${candidate.status().numPeers()} connected peers")
+                            reportAt=System.currentTimeMillis()
+                        }
                         if(candidate.status().hasMetadata()) {
                             val borrowed=candidate.torrentFile()
                             if(borrowed!=null && borrowed.isValid && borrowed.numFiles()>0) {
                                 // torrentFile() is borrowed from the running handle. Own a decoded
-                                // native copy before removing that metadata-only handle. Serializing
+                                // native copy while keeping the connected handle alive. Serializing
                                 // magnet metadata can fail before v2 piece layers have arrived.
                                 info=TorrentInfo(com.frostwire.jlibtorrent.swig.torrent_info(borrowed.swig()))
                                 if(info.isValid && info.numFiles()>0)break
@@ -88,13 +97,12 @@ class TorrentEngine(private val context: Context, private val discovery: Boolean
                 }
                 check(!closed && !cancelled) { "Torrent playback was stopped" }
                 check(info!=null && info.isValid && info.infoHashV1().toHex().equals(hash,true)) { "No torrent metadata arrived. This source may have no reachable seeders. Try another source." }
-            } finally { candidate?.let { if(it.isValid)session.remove(it) } }
-            val query=android.net.Uri.parse("http://localhost/?"+uri.substringAfter('?',""))
-            for(tracker in query.getQueryParameters("tr").distinct().take(32)) {
-                val parsed=android.net.Uri.parse(tracker)
-                if(parsed.scheme in listOf("http","https","udp") && !parsed.host.isNullOrEmpty()) info!!.addTracker(tracker)
-            }
-            metadata = info!!; magnet = uri; directory = File(root,hash).apply { mkdirs() }
+                handle=candidate; keep=true
+            } finally { if(!keep) candidate?.let { if(it.isValid)session.remove(it) } }
+            // Keep the metadata handle, peer list and tracker session alive.
+            // Re-adding the torrent discarded the only peers already discovered.
+            metadata = info!!
+
         }
         val info = metadata!!; val files = info.files(); val list = JSONArray()
         for (i in 0 until info.numFiles()) list.put(JSONObject().put("id",i).put("name",files.filePath(i)).put("size",files.fileSize(i)))
@@ -109,36 +117,36 @@ class TorrentEngine(private val context: Context, private val discovery: Boolean
         check(size > 0 && size < dir.usableSpace - 128L * 1024 * 1024) { "Not enough free storage for this video. Choose a smaller source." }
         val path = File(dir,files.filePath(index)).canonicalFile
         check(path.path.startsWith(dir.canonicalPath + File.separator)) { "Invalid video path" }
-        val peers = android.net.Uri.parse("http://localhost/?"+magnet.substringAfter('?',"" )).getQueryParameters("x.pe").mapNotNull { endpoint ->
-            try { val split=endpoint.lastIndexOf(':'); TcpEndpoint(endpoint.substring(0,split),endpoint.substring(split+1).toInt()) } catch (_: Exception) { null }
-        }
-        session.download(info,dir,null,Priority.array(Priority.IGNORE,info.numFiles()),peers,TorrentFlags.PAUSED)
-        val deadline = System.currentTimeMillis()+5000
-        var th = session.find(info)
-        while ((th == null || !th.isValid) && System.currentTimeMillis()<deadline && !closed) { Thread.sleep(50); th=session.find(info) }
-        check(th != null && th.isValid && !closed) { "Could not start this torrent" }
-        handle = th
+        val th = handle ?: throw IllegalStateException("Choose this source again")
+        check(th.isValid && !closed) { "Could not start this torrent" }
         th.unsetFlags(TorrentFlags.AUTO_MANAGED); th.unsetFlags(TorrentFlags.UPLOAD_MODE); th.unsetFlags(TorrentFlags.STOP_WHEN_READY)
         th.prioritizeFiles(Priority.array(Priority.IGNORE,info.numFiles()).also { it[index]=Priority.NORMAL })
         th.setFlags(TorrentFlags.SEQUENTIAL_DOWNLOAD); th.resume()
         val selected = Selection(UUID.randomUUID().toString(),info,th,index,path,size,files.fileOffset(index))
         active = selected; lastUsed=System.currentTimeMillis()
         // Download a verified starting piece before launching an external player.
-        waitPiece(selected,(selected.offset/info.pieceLength()).toInt(),45000)
+        progress("Buffering video · ${th.status().numPeers()} connected peers")
+        waitPiece(selected,(selected.offset/info.pieceLength()).toInt(),45000,true)
         return JSONObject().put("url","http://127.0.0.1:${server.localPort}/stream/${selected.token}")
             .put("file",files.fileName(index)).put("size",size)
     }
 
-    private fun waitPiece(s: Selection, piece: Int, timeout: Long = 45000) {
+    private fun waitPiece(s: Selection, piece: Int, timeout: Long = 45000, report: Boolean = false) {
         s.handle.piecePriority(piece,Priority.SEVEN); s.handle.setPieceDeadline(piece,0)
         val until=System.currentTimeMillis()+timeout
+        var reportAt=0L
         while(!closed && active === s && !s.handle.havePiece(piece) && System.currentTimeMillis()<until) {
             val error=s.handle.status().errorCode()
             check(error.value()==0) { "Torrent download failed: ${error.message()}" }
+            if(report && System.currentTimeMillis()-reportAt>1000) {
+                val status=s.handle.status()
+                progress("Buffering · ${status.numPeers()} peers · ${status.downloadPayloadRate()/1024} KB/s · ${status.totalDone()/1024} KB received")
+                reportAt=System.currentTimeMillis()
+            }
             Thread.sleep(60)
         }
         check(!closed && active === s) { "Torrent playback was stopped" }
-        check(s.handle.havePiece(piece)) { "No video data arrived. Try a source with more reachable seeders." }
+        check(s.handle.havePiece(piece)) { "No video data arrived from ${s.handle.status().numPeers()} connected peers. Choose another source; the advertised seed count does not guarantee reachable peers." }
     }
 
     private fun serve(socket: Socket) {
@@ -187,7 +195,7 @@ class TorrentEngine(private val context: Context, private val discovery: Boolean
         } finally {connections.decrementAndGet();lastUsed=System.currentTimeMillis()}
     }
 
-    fun cancelPending() { cancelled=true;active=null;clients.forEach{try{it.close()}catch(_:Exception){}} }
+    fun cancelPending() { cancelled=true;active=null;handle?.let{if(it.isValid)it.pause()};clients.forEach{try{it.close()}catch(_:Exception){}} }
     fun owns(url:String)=active?.let { url=="http://127.0.0.1:${server.localPort}/stream/${it.token}" } ?: false
     fun close() { closed=true;active=null;try{server.close()}catch(_:Exception){};clients.forEach{try{it.close()}catch(_:Exception){}};workers.shutdownNow();session.stop();root.deleteRecursively() }
 }

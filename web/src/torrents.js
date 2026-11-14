@@ -261,7 +261,10 @@ export async function resolveSource(stream, provider, episode, choose, active = 
   }
   if (!active()) throw new Error('Cancelled');
   const result = await api('ad', 'v4/magnet/files', 'POST', { 'id[]': job.id });
-  const files = flattenFiles(result.magnets?.find((x) => String(x.id) === String(job.id))?.files || m.files);
+  const entries=Array.isArray(result.magnets)?result.magnets:[result.magnets];
+  const entry=entries.find(x=>x && String(x.id)===String(job.id));
+  if(entry?.error) throw new Error('AllDebrid could not retrieve this ready torrent: '+(entry.error.message || entry.error.code || 'files unavailable'));
+  const files = flattenFiles(entry?.files || m.files);
   // AllDebrid's file tree has no torrent file-index guarantee: match episode or ask.
   const f = await chooseVideo(files.filter(f => mediaUrl(f.link)), { ...stream, fileIdx: null }, episode, choose);
   if (!active()) throw new Error('Cancelled');
@@ -281,7 +284,7 @@ export function torrentServerBase(value) {
   return u.href.replace(/\/$/, '');
 }
 // Read-only checks. Connecting an account never means a torrent is cached.
-export async function readySources(sources, refresh = false) {
+export async function readySources(sources, refresh = false, timeout = 0) {
   const found = new Map(), errors = [];
   await Promise.all(Object.keys(PROVIDERS).filter(p => accounts()[p]?.key).map(async provider => {
     const key = provider + ':' + accounts()[provider].key;
@@ -304,34 +307,47 @@ export async function readySources(sources, refresh = false) {
         entry = { time:Date.now(), promise }; readyCache.set(key,entry);
         promise.catch(() => readyCache.delete(key));
       }
-      for (const m of await entry.promise) if (sources.some(s => s.hash === m.hash)) {
+      let timer;
+      const rows=await (timeout>0 ? Promise.race([entry.promise,new Promise((_,reject)=>{
+        timer=setTimeout(()=>reject(new Error('Availability check timed out')),timeout);
+      })]) : entry.promise).finally(()=>clearTimeout(timer));
+      for (const m of rows) if (sources.some(s => s.hash === m.hash)) {
         const list = found.get(m.hash) || []; list.push(m); found.set(m.hash,list);
       }
     } catch { errors.push(PROVIDERS[provider]); }
   }));
   return { found, errors };
 }
-export async function resolvePlayable(stream, provider, episode, choose, active = () => true) {
+export async function resolvePlayable(stream, provider, episode, choose, active = () => true, progress = () => {}) {
   if (!active()) throw new Error('Cancelled');
   if (stream.url) return {url:stream.url};
-  let availabilityTimer;
-  const {found} = await Promise.race([readySources([stream]), new Promise(resolve => { availabilityTimer=setTimeout(()=>resolve({found:new Map()}),1200); })]).finally(()=>clearTimeout(availabilityTimer));
+  progress('Checking your Debrid accounts for a ready video…');
+  // Do not discard valid cloud responses simply because an API takes >1.2s.
+  // Bound each provider independently: a stalled account must not discard a
+  // ready response already returned by the other account.
+  const {found,errors} = await readySources([stream],false,8000);
   if (!active()) throw new Error('Cancelled');
-  const available = found.get(stream.hash) || [];
-  const ready = available.find(m => m.provider === provider) || available[0];
-  if (ready) {
+  const available = (found.get(stream.hash) || []).slice().sort((a,b)=>(b.provider===provider)-(a.provider===provider));
+  const failures = errors.map(name=>name+' availability check failed');
+  for (const ready of available) {
     const jk = ready.provider + ':' + stream.hash + ':' + (episode?.id || '') + ':' + (stream.fileIdx ?? '');
     jobs.set(jk,{id:ready.id});
+    progress('Opening the ready video in '+PROVIDERS[ready.provider]+'…');
     try { return await resolveSource(stream,ready.provider,episode,choose,active,true); }
-    catch(e) { if(e.message==='Cancelled' || !active()) throw new Error('Cancelled'); readyCache.clear(); stream.readyProviders=[]; }
+    catch(e) {
+      if(e.message==='Cancelled' || !active()) throw new Error('Cancelled');
+      failures.push(e.message); readyCache.clear();
+    }
   }
+  stream.readyProviders=[];
+  const report = message => progress((failures.length?failures.join(' · ')+'. ':'')+message);
   if (N.hasLocalTorrentEngine) {
-    const metadata=await N.torrentPrepare(magnetUrl(stream));
-    if(!active()){N.torrentCancel();throw new Error('Cancelled');}
+    const metadata=await N.torrentPrepare(magnetUrl(stream),report);
+    if(!active())throw new Error('Cancelled');
     let file;
-    try { file=await chooseVideo(metadata.files || [],stream,episode,choose); } catch(e) { N.torrentCancel();throw e; }
-    if(!active()){N.torrentCancel();throw new Error('Cancelled');}
-    return N.torrentStart(metadata.hash,file.id);
+    try { file=await chooseVideo(metadata.files || [],stream,episode,choose); } catch(e) { if(active())N.torrentCancel();throw e; }
+    if(!active())throw new Error('Cancelled');
+    return N.torrentStart(metadata.hash,file.id,report);
   }
   const configured = setting('torrentServer');
   if (!configured) return {url:magnetUrl(stream),magnet:true};

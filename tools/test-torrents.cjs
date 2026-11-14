@@ -291,10 +291,10 @@ for(const provider of ['rd','ad']) test(provider+' source OK resolves through De
  assert.equal(d.onKey('ok'),true);await delay(20);assert.equal(x.w.document.querySelector('.sheet'),null);
  const handoffs=x.calls.filter(c=>c.handoff);assert.equal(handoffs.length,1);assert.equal(handoffs[0].pkg,'org.videolan.vlc');assert.equal(handoffs[0].url,'https://cdn.test/'+provider+'.mkv');d.destroy();
 });
-test('one click plays the selected source in VLC; duplicate clicks do not change the pending source',async()=>{
+test('one click plays the selected source in VLC; duplicate clicks on it launch once',async()=>{
  const x=setup(async()=>({streams:[{url:'https://cdn.test/first.mp4'},{url:'https://cdn.test/second.mp4'}]}),{settings:{playerMovie:'org.videolan.vlc'}});
  const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(20);
- const row=x.view.querySelector('[data-source="1"]');row.querySelector('b').click();x.view.querySelector('[data-source="0"]').click();await delay(20);
+ const row=x.view.querySelector('[data-source="1"]');row.querySelector('b').click();row.click();await delay(20);
  assert.equal(x.w.document.querySelector('.sheet'),null);assert.equal(x.calls.filter(c=>c.handoff).length,1);assert.equal(x.calls.find(c=>c.handoff).pkg,'org.videolan.vlc');assert.equal(x.calls.find(c=>c.handoff).url,'https://cdn.test/second.mp4');
  row.focus();assert.equal(d.onKey('right'),true);assert.match(x.w.document.querySelector('.sheet h2').textContent,/Source 2/);
  assert.equal(x.view.querySelectorAll('#td-play,#td-download,#td-provider').length,0);d.destroy();
@@ -364,7 +364,7 @@ test('uncached Debrid add-on resolver URLs are never opened as direct playback',
 test('a stalled Debrid availability check cannot hold up external playback indefinitely',async()=>{
  const x=setup(async()=>new Promise(()=>{}));x.torrents.saveAccount('ad','TEST');const started=Date.now();
  const result=await x.torrents.resolvePlayable({hash:'f'.repeat(40)},'ad',null,()=>{});
- assert.equal(result.magnet,true);assert.ok(Date.now()-started<2000);assert.ok(x.calls.every(c=>!c.url.includes('/upload')));
+ assert.equal(result.magnet,true);assert.ok(Date.now()-started<9000);assert.ok(x.calls.every(c=>!c.url.includes('/upload')));
 });
 
 test('a stale ready badge falls back to external playback instead of starting cloud preparation',async()=>{
@@ -471,4 +471,70 @@ test('saved Malayalam home preference shows channels before 2026 and 2025 film r
  // Respect a deliberate channels-off selection rather than forcing it back on.
  x.store.setLangRows('malayalam',['films']);
  assert.deepEqual(Array.from(home.rows(),r=>r.title),['MALAYALAM (2026)','MALAYALAM (2025)']);
+});
+
+test('a slow valid AllDebrid response is used instead of discarding it after 1.2 seconds',async()=>{
+ const hash='a'.repeat(40);
+ const x=setup(async(url,method,body)=>{
+  if(url.endsWith('/magnet/status')){
+   if(new URLSearchParams(body).has('status')){await delay(1400);return {status:'success',data:{magnets:[{id:8,hash,statusCode:4}]}};}
+   return {status:'success',data:{magnets:{id:8,statusCode:4}}};
+  }
+  if(url.endsWith('/magnet/files'))return {status:'success',data:{magnets:[{id:8,files:[{n:'Film.mkv',l:'https://alldebrid.com/f/test'}]}]}};
+  if(url.endsWith('/link/unlock'))return {status:'success',data:{link:'https://cdn.test/video.mkv'}};
+  throw Error('Unexpected request');
+ },{},null,()=>assert.fail('Ready Debrid source must not start a local torrent'));
+ x.torrents.saveAccount('ad','TEST');
+ const progress=[];const r=await x.torrents.resolvePlayable({hash},'ad',null,()=>assert.fail(),()=>true,m=>progress.push(m));
+ assert.equal(r.url,'https://cdn.test/video.mkv');assert.ok(progress.some(m=>m.includes('ready video in AllDebrid')));
+ assert.ok(x.calls.every(c=>!c.url.includes('/upload')));
+});
+test('another ready provider is tried if the preferred provider fails',async()=>{
+ const hash='a'.repeat(40);const x=setup(async(url,method,body)=>{
+  if(url.endsWith('/torrents?limit=1000'))return [{id:'r1',hash,status:'downloaded'}];
+  if(url.includes('/torrents/info/'))return {error:'bad_token',error_code:8};
+  if(url.endsWith('/magnet/status'))return {status:'success',data:{magnets:new URLSearchParams(body).has('status')?[{id:8,hash,statusCode:4}]:{id:8,statusCode:4}}};
+  if(url.endsWith('/magnet/files'))return {status:'success',data:{magnets:[{id:8,files:[{n:'Film.mkv',l:'https://alldebrid.com/f/test'}]}]}};
+  if(url.endsWith('/link/unlock'))return {status:'success',data:{link:'https://cdn.test/fallback.mkv'}};
+  throw Error('Unexpected request');
+ });x.torrents.saveAccount('rd','TEST');x.torrents.saveAccount('ad','TEST');
+ assert.equal((await x.torrents.resolvePlayable({hash},'rd',null,()=>assert.fail())).url,'https://cdn.test/fallback.mkv');
+});
+
+test('selecting another source cancels the stalled one without a late handoff or cancelling the replacement',async()=>{
+ const hashes=['a'.repeat(40),'b'.repeat(40)];let firstReply;
+ const first=new Promise(resolve=>firstReply=resolve);
+ const x=setup(async()=>({streams:hashes.map(infoHash=>({infoHash,fileIdx:0}))}),{},null,async(method,args)=>{
+  if(method==='torrentPrepare')return args[0].includes(hashes[0])?first:{hash:hashes[1],files:[{id:0,name:'Film.mkv',size:100}]};
+  return {url:'http://127.0.0.1:5555/stream/second',file:'Film.mkv'};
+ });
+ const d=new x.TorrentDetailScreen(x.view,{item:{id:'tt1',type:'movie',name:'Film'}},x.app);await delay(20);
+ d.activateSource(x.view.querySelector('[data-source="0"]'));await delay(10);
+ d.activateSource(x.view.querySelector('[data-source="1"]'));await delay(20);
+ firstReply({hash:hashes[0],files:[{id:0,name:'Film.mkv',size:100}]});await delay(20);
+ assert.equal(x.calls.filter(c=>c.handoff).length,1);assert.match(x.calls.find(c=>c.handoff).url,/second$/);
+ assert.equal(x.calls.filter(c=>c.engine==='cancel').length,1);
+ d.destroy();
+});
+
+test('native torrent progress updates status without resolving preparation early',async()=>{
+ let finish;
+ const x=setup(async()=>({}),{},null,()=>new Promise(resolve=>finish=resolve),{},w=>{
+  const prepare=w.Native.torrentPrepare;
+  w.Native.torrentPrepare=(id,...args)=>{w.__nat('torrentProgress',{id,message:'Buffering · 0 peers · 0 KB/s'});prepare(id,...args);};
+ });const messages=[];
+ const operation=x.torrents.resolvePlayable({hash:'a'.repeat(40)},'',null,()=>assert.fail(),()=>true,m=>messages.push(m));
+ await delay(20);assert.ok(messages.some(m=>m.includes('0 peers')));
+ finish({hash:'a'.repeat(40),files:[]});await assert.rejects(()=>operation,/No playable video/);
+});
+
+test('one stalled account does not discard another providers ready result',async()=>{
+ const hash='a'.repeat(40);const x=setup(async(url,method,body)=>{
+  if(url.includes('real-debrid.com'))return new Promise(()=>{});
+  if(url.endsWith('/magnet/status'))return {status:'success',data:{magnets:new URLSearchParams(body).has('status')?[{id:8,hash,statusCode:4}]:{id:8,statusCode:4}}};
+  if(url.endsWith('/magnet/files'))return {status:'success',data:{magnets:[{id:8,files:[{n:'Film.mkv',l:'https://alldebrid.com/f/test'}]}]}};
+  if(url.endsWith('/link/unlock'))return {status:'success',data:{link:'https://cdn.test/ready.mkv'}};
+  throw Error('Unexpected request');
+ });x.torrents.saveAccount('rd','TEST');x.torrents.saveAccount('ad','TEST');
+ assert.equal((await x.torrents.resolvePlayable({hash},'rd',null,()=>assert.fail())).url,'https://cdn.test/ready.mkv');
 });

@@ -38,6 +38,8 @@ class TorrentEngineTest {
         settings.setEnableDht(false);settings.setEnableLsd(false)
         val seeder=SessionManager();seeder.start(SessionParams(settings))
         val engine=TorrentEngine(isolated,false)
+        val progress=java.util.concurrent.CopyOnWriteArrayList<String>()
+        engine.progress={progress.add(it)}
         try {
             val ti=TorrentInfo(torrent);assertTrue(ti.isValid)
             seeder.download(ti,seedDir)
@@ -47,6 +49,8 @@ class TorrentEngineTest {
             val metadata=engine.prepare("magnet:?xt=urn:btih:$hash&x.pe=127.0.0.1:$port")
             assertEquals(hash,metadata.getString("hash"));assertEquals("fixture.mp4",metadata.getJSONArray("files").getJSONObject(0).getString("name"))
             val result=engine.startStream(hash,0);val url=result.getString("url")
+            assertTrue("Preparation must report actual progress",progress.any{it.contains("metadata")})
+            assertTrue("Buffering must report actual peer count",progress.any{it.contains("connected peers")})
             assertTrue(url.startsWith("http://127.0.0.1:"));assertEquals(payload.size.toLong(),result.getLong("size"))
             fun request(range:String?,method:String="GET"):kotlin.Pair<HttpURLConnection,ByteArray>{
                 val c=URL(url).openConnection() as HttpURLConnection;c.connectTimeout=10000;c.readTimeout=20000;c.requestMethod=method

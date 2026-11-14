@@ -62,12 +62,12 @@ class NativeBridge(private val act: MainActivity) {
             try {
                 val service=Intent(act,TorrentPlaybackService::class.java)
                 if(Build.VERSION.SDK_INT>=26)act.startForegroundService(service)else act.startService(service)
-                TorrentRuntime.prepare(act,magnet){result,error->torrentReply(id,result,error)}
+                TorrentRuntime.prepare(act,magnet,{message->emit("torrentProgress",JSONObject().put("id",id).put("message",message))}){result,error->torrentReply(id,result,error)}
             }catch(e:Exception){torrentReply(id,null,e.message?:"Could not start torrent playback")}
         }
     }
     @JavascriptInterface
-    fun torrentStart(id:Int,hash:String,file:Int) = TorrentRuntime.start(act,hash,file){result,error->torrentReply(id,result,error)}
+    fun torrentStart(id:Int,hash:String,file:Int) = TorrentRuntime.start(act,hash,file,{message->emit("torrentProgress",JSONObject().put("id",id).put("message",message))}){result,error->torrentReply(id,result,error)}
     @JavascriptInterface
     fun torrentCancel() = TorrentRuntime.stop(act)
     private fun torrentReply(id:Int,result:JSONObject?,error:String?) {

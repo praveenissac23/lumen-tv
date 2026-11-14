@@ -52,7 +52,10 @@ class TorrentVlcFixture(context:Context):AutoCloseable {
                 val output=it.getOutputStream()
                 if(request.getOrNull(1)?.startsWith("/announce")==true){
                     trackerRequests.incrementAndGet()
-                    val body="d8:intervali1e5:peers6:".toByteArray()+byteArrayOf(127,0,0,1,(peerPort shr 8).toByte(),peerPort.toByte())+"e".toByteArray()
+                    // Only the first announce supplies peers. Playback must retain the
+                    // metadata handle instead of depending on a fresh tracker response.
+                    val peers=if(trackerRequests.get()==1)byteArrayOf(127,0,0,1,(peerPort shr 8).toByte(),peerPort.toByte())else byteArrayOf()
+                    val body="d8:intervali1800e5:peers${peers.size}:".toByteArray()+peers+"e".toByteArray()
                     output.write("HTTP/1.1 200 OK\r\nContent-Type: text/plain\r\nContent-Length: ${body.size}\r\nConnection: close\r\n\r\n".toByteArray());output.write(body)
                 }else if(request.getOrNull(1)=="/video.mp4"){
                     videoRequests.incrementAndGet()

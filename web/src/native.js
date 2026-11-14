@@ -17,6 +17,7 @@ let seq = 0;
 // Native -> JS entry point.
 window.__nat = (evt, data) => {
   if (typeof data === 'string') { try { data = JSON.parse(data); } catch { /* keep string */ } }
+  if (evt === 'torrentProgress') { pending.get(data.id)?.progress?.(data.message); return; }
   if (evt === 'head' || evt === 'call' || evt === 'artwork') {
     const p = pending.get(data.id);
     if (!p) { if (evt === 'artwork' && data.ok) N.take(data.id); return; }
@@ -289,15 +290,15 @@ export function installUpdateWith(url, mode) { if (N && N.installUpdateWith) N.i
 
 // Lazy, built-in torrent playback: only requested after a source action is chosen.
 export const hasLocalTorrentEngine = !!(N && N.torrentPrepare && N.torrentStart && (+device().sdk || 24) >= 24);
-function torrentRequest(method,args,timeout) {
+function torrentRequest(method,args,timeout,progress) {
   if(!hasLocalTorrentEngine) return Promise.reject(new Error('This build has no local torrent engine.'));
   const id=++seq;
   return new Promise((resolve,reject)=>{
     const timer=setTimeout(()=>{pending.delete(id);if(N.torrentCancel)N.torrentCancel();reject(new Error('Torrent playback timed out. Try a source with more seeders.'));},timeout);
-    pending.set(id,{resolve:raw=>{clearTimeout(timer);try{resolve(JSON.parse(raw));}catch{reject(new Error('Invalid torrent engine response.'));}},reject:e=>{clearTimeout(timer);reject(e)}});
+    pending.set(id,{progress,resolve:raw=>{clearTimeout(timer);try{resolve(JSON.parse(raw));}catch{reject(new Error('Invalid torrent engine response.'));}},reject:e=>{clearTimeout(timer);reject(e)}});
     try { N[method](id,...args); } catch(e){pending.delete(id);clearTimeout(timer);reject(e);}
   });
 }
-export const torrentPrepare = magnet => torrentRequest('torrentPrepare',[magnet],45000);
-export const torrentStart = (hash,file) => torrentRequest('torrentStart',[hash,file],55000);
+export const torrentPrepare = (magnet,progress) => torrentRequest('torrentPrepare',[magnet],45000,progress);
+export const torrentStart = (hash,file,progress) => torrentRequest('torrentStart',[hash,file],55000,progress);
 export function torrentCancel() { if(N && N.torrentCancel)N.torrentCancel(); }

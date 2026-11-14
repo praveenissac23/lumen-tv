@@ -42,21 +42,22 @@ object TorrentRuntime {
     private val executor=Executors.newSingleThreadExecutor()
     private val generation=AtomicInteger()
     @Volatile var current:TorrentEngine?=null;private set
-    fun prepare(context:Context,uri:String,reply:(JSONObject?,String?)->Unit) {
+    fun prepare(context:Context,uri:String,progress:(String)->Unit={},reply:(JSONObject?,String?)->Unit) {
         val request=generation.incrementAndGet();current?.cancelPending()
         executor.execute {
             if(request!=generation.get()){reply(null,"Selection cancelled");return@execute}
             try {
                 val engine=current ?: TorrentEngine(context.applicationContext).also { current=it }
+                engine.progress={if(request==generation.get())progress(it)}
                 val result=engine.prepare(uri)
                 if(request==generation.get())reply(result,null)else reply(null,"Selection cancelled")
             } catch(e:Throwable) { reply(null,e.message?:"Torrent engine could not start");if(request==generation.get())stop(context) }
         }
     }
-    fun start(context:Context,hash:String,file:Int,reply:(JSONObject?,String?)->Unit) {
+    fun start(context:Context,hash:String,file:Int,progress:(String)->Unit={},reply:(JSONObject?,String?)->Unit) {
         val request=generation.get()
         executor.execute {
-            try { val result=current?.startStream(hash,file) ?: throw IllegalStateException("Choose this source again");if(request==generation.get())reply(result,null)else reply(null,"Selection cancelled") }
+            try { current?.progress={if(request==generation.get())progress(it)};val result=current?.startStream(hash,file) ?: throw IllegalStateException("Choose this source again");if(request==generation.get())reply(result,null)else reply(null,"Selection cancelled") }
             catch(e:Throwable){reply(null,e.message?:"Torrent playback could not start");if(request==generation.get())stop(context)}
         }
     }

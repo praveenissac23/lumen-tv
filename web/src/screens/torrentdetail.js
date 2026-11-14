@@ -137,7 +137,10 @@ export class TorrentDetailScreen {
   activateSource(button) {
     const index = +button.dataset.source;
     if (!Number.isInteger(index) || !this.sources?.[index]) return;
-    if(this.busy) return;
+    if(this.busy) {
+      if(index===this.index)return;
+      N.torrentCancel(); ++this.actionToken; this.busy=false; this.clearPending();
+    }
     this.index = index; this.markSelection(); this.launch(false,{pkg:'org.videolan.vlc',autoFile:true});
   }
   refreshRoutes() {
@@ -193,7 +196,7 @@ export class TorrentDetailScreen {
     if (this.busy || !this.sources?.length || this.dead) return;
     this.busy = true;
     const pendingRow=this.view.querySelector(`[data-source="${this.index}"]`);
-    if(pendingRow){pendingRow.setAttribute('aria-busy','true');pendingRow.querySelector('.td-row-play').textContent='Starting VLC… Hold OK or press Menu for options';}
+    if(pendingRow){pendingRow.setAttribute('aria-busy','true');pendingRow.querySelector('.td-row-play').textContent='Preparing video… Hold OK or press Menu for options';}
     const action = ++this.actionToken;
     const token = this.token, stream = this.sources[this.index];
     const alive = () => !this.dead && token === this.token && action === this.actionToken;
@@ -204,7 +207,7 @@ export class TorrentDetailScreen {
         if(autoFile && !this.episode) return files.reduce((best,file)=>(+file.size||0)>(+best.size||0)?file:best,files[0]);
         const value = await sheet({ title: 'Choose the video file', options: files.slice(0, 200).map((f, i) => ({ label: f.name, hint: f.size ? bytes(f.size) : '', value: String(i) })) });
         return alive() && value != null ? files[+value] : null;
-      }, alive);
+      }, alive, message=>{if(alive())this.status(message);});
       if (!alive()) return;
       if (prepareProvider) {
         this.status(result ? 'Ready in '+PROVIDERS[prepareProvider]+'. Select the source to play.' : 'Added to '+PROVIDERS[prepareProvider]+'. Preparing there; no player was opened.');
