@@ -37,10 +37,24 @@ export const LANGS = [
 ];
 export const langById = (id) => LANGS.find((l) => l.id === id);
 
+// Short codes providers put in category names ("EN| MOVIES", "|ML| 2025", "[TAM]", "MAL-2024"):
+// matched as whole words, whatever punctuation surrounds them.
+const CODES = {
+  malayalam: ['ml', 'mal', 'mlm', 'malay'], tamil: ['ta', 'tam', 'tml'], hindi: ['hi', 'hin', 'hnd'], telugu: ['te', 'tel'],
+  kannada: ['kn', 'kan'], english: ['en', 'eng', 'uk', 'us', 'usa', 'gb'], arabic: ['ar', 'ara'], bengali: ['bn', 'ben'],
+  punjabi: ['pb', 'pun'], marathi: ['mr', 'mar'], urdu: ['ur', 'urd', 'pk'], filipino: ['ph', 'fil'], gujarati: ['gu', 'guj'],
+  turkish: ['tr', 'tur'], french: ['fr', 'fra'], spanish: ['esp', 'spa'], portuguese: ['br', 'por'], german: ['ger', 'deu'],
+  italian: ['ita'], russian: ['ru', 'rus'], korean: ['kr', 'kor'], japanese: ['jp', 'jap', 'jpn'], chinese: ['cn', 'hk', 'chi'],
+  thai: ['tha'], persian: ['ir', 'per'], sinhala: ['lk', 'sin'], nepali: ['np', 'nep'],
+};
 const cache = new Map();
 function matches(text, lang) {
-  const t = ' ' + String(text || '').toLowerCase() + ' ';
-  return lang.keys.some((k) => t.includes(k));
+  const low = String(text || '').toLowerCase();
+  const t = ' ' + low + ' ';
+  if (lang.keys.some((k) => k.length > 4 && t.includes(k))) return true;   // whole names: "malayalam", "hollywood"…
+  const words = low.split(/[^a-z0-9\u0600-\u06ff]+/).filter(Boolean);
+  const codes = CODES[lang.id] || [];
+  return words.some((w) => codes.includes(w)) || lang.keys.some((k) => k.length <= 4 && t.includes(k));
 }
 
 // Category ids of `kind` that belong to a language (cached per catalogue load).

@@ -154,6 +154,7 @@ export function focus(elm, { noScroll = false } = {}) {
   elm.focus({ preventScroll: true });
   const g = elm.closest('[data-group]');
   if (g) g._last = elm;
+  if (window.__warmImages && elm.parentElement && elm.parentElement.parentElement && elm.parentElement.parentElement.dataset.scroll === 'x') window.__warmImages(elm);
   if (elm.parentElement && elm.parentElement.parentElement && elm.parentElement.parentElement.dataset.scroll === 'x') elm.parentElement._last = elm;
   if (!noScroll) reveal(elm);
   if (prev !== elm) elm.dispatchEvent(new CustomEvent('focused', { bubbles: true }));

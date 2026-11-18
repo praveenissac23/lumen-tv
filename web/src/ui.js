@@ -62,7 +62,11 @@ export function directImageUrl(url, w) {
 }
 const imageQueue = [], imageJobs = new Map();
 let imageActive = 0;
+let drainTimer = null;
 function drainImages() {
+  // While the remote is moving, the main thread belongs to the animation: pictures wait until it rests.
+  const busy = performance.now() - (window.__lastNav || 0);
+  if (busy < 180 && imageQueue.length) { clearTimeout(drainTimer); drainTimer = setTimeout(drainImages, 190 - busy); return; }
   while (imageActive < 3 && imageQueue.length) {
     const job = imageQueue.shift(); ++imageActive;
     Promise.resolve().then(() => artwork(job.url, job.w)).then((src) => {
@@ -114,8 +118,21 @@ function discoverImages(node) {
 }
 new MutationObserver((records) => {
   for (const record of records) for (const node of record.addedNodes) discoverImages(node);
-  for (const image of observedImages) if (!imageAttached(image)) { imageObserver.unobserve(image); observedImages.delete(image); }
 }).observe(document.documentElement, { childList: true, subtree: true });
+window.__warmImages = (t) => warmImages(t);
+// forget pictures that left the page now and then, not on every change
+setInterval(() => { for (const image of observedImages) if (!imageAttached(image)) { imageObserver.unobserve(image); observedImages.delete(image); } }, 10000);
+// Load the pictures of the next tiles in a row before they scroll into view (rows clip them, so the
+// viewport observer only sees them once they are already on screen).
+export function warmImages(tile, ahead = 8) {
+  let n = tile && tile.nextElementSibling;
+  for (let i = 0; i < ahead && n; i++, n = n.nextElementSibling) {
+    for (const image of n.querySelectorAll('img[data-artwork-state="waiting"]')) {
+      if (imageObserver && observedImages.has(image)) { imageObserver.unobserve(image); observedImages.delete(image); }
+      loadImage(image);
+    }
+  }
+}
 discoverImages(document.documentElement);
 window.__lumenImageError = (image) => {
   if (hasArtworkBridge && image.dataset.artworkState === 'waiting') { window.__lumenLoadImage(image); return; }

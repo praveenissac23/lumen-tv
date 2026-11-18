@@ -293,9 +293,17 @@ export class HomeScreen {
     const cap = (list) => (n > 0 ? list.slice(0, n) : list);
     const word = kind === 'movie' ? 'films' : 'series';
     const screen = kind === 'movie' ? 'movies' : 'series';
-    let cats = picked
-      ? C.cats[kind].map((c, i) => ({ c, i, y: catYear(c.name) })).filter((x) => picked.includes(x.c.id)).sort((a, b) => (b.y - a.y) || (a.i - b.i)).map((x) => x.c)
-      : langCatList(kind, id);
+    // Chosen categories that still exist, plus any newer-year category of the language that has
+    // appeared since (choosing 2025 and 2024 last year should bring in 2026 when it arrives).
+    let cats = langCatList(kind, id);
+    if (picked) {
+      const still = C.cats[kind].filter((c) => picked.includes(c.id));
+      if (still.length) {
+        const top = Math.max(0, ...still.map((c) => catYear(c.name)));
+        const newer = top ? cats.filter((c) => !picked.includes(c.id) && catYear(c.name) > top) : [];
+        cats = [...newer, ...still].map((c, i) => ({ c, i, y: catYear(c.name) })).sort((a, b) => (b.y - a.y) || (a.i - b.i)).map((x) => x.c);
+      }
+    }
     cats = cats.filter((c) => !needsPin(kind, c.id));
     const inCat = (c) => newestAll(`c-${kind}-${c.id}`, itemsIn(kind, c.id).filter(ok));
     if (pr.split) {
