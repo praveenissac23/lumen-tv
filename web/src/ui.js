@@ -65,7 +65,7 @@ let imageActive = 0;
 let drainTimer = null;
 function drainImages() {
   // While the remote is moving, the main thread belongs to the animation: pictures wait until it rests.
-  const busy = performance.now() - (window.__lastNav || 0);
+  const busy = window.__lastNav ? performance.now() - window.__lastNav : 1e9;
   if (busy < 180 && imageQueue.length) { clearTimeout(drainTimer); drainTimer = setTimeout(drainImages, 190 - busy); return; }
   while (imageActive < 3 && imageQueue.length) {
     const job = imageQueue.shift(); ++imageActive;
