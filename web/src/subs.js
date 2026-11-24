@@ -75,7 +75,7 @@ export async function searchSubs(item, langs = setting('subLangs')) {
         if (item.episode && +f.episode && +f.episode !== +item.episode) continue;
         results.push({ source: 'SubDL', url: 'https://dl.subdl.com' + f.url,
           lang: String(f.language || '').toLowerCase(), name: f.release_name || f.name || sub.release_name || '',
-          downloads: 0, hashMatch: false, hi: !!f.hi });
+          downloads: 0, hashMatch: false, hi: !!f.hi, nId: f.url.split('/')[2], fileNId: f.file_n_id || f.url.split('/')[3] });
       }
     }
   })());
@@ -87,6 +87,54 @@ export async function searchSubs(item, langs = setting('subLangs')) {
   results.sort((x, y) => (y.hashMatch - x.hashMatch) || (order(x.lang) - order(y.lang)) ||
     (x.source === 'SubDL' ? -1 : 1) - (y.source === 'SubDL' ? -1 : 1) || (y.downloads - x.downloads));
   return results;
+}
+
+// SubtitleCat publishes already translated SRT files. This is a best-effort
+// search for an existing Malayalam track; its website does not offer a
+// supported translation API for starting a new job from a TV app.
+export async function subtitleCatMalayalam(item) {
+  const title = String(item.title || '').replace(/\.[^.]{2,4}$/, '');
+  const episode = /\b(?:S\d{1,2}E\d{1,3}|EP[ ._-]?\d{1,3})\b/i.exec(title)?.[0]?.replace(/[^A-Z0-9]/gi, '').toLowerCase();
+  const base = 'https://www.subtitlecat.com/';
+  const html = await N.call('GET', base + 'index.php?search=' + encodeURIComponent(title), {});
+  const pages = [...html.matchAll(/href=["']\/?(subs\/\d+\/[^"'<>]+?\.html)["']/gi)]
+    .map((m) => m[1]).filter((x, i, all) => all.indexOf(x) === i).slice(0, 8);
+  for (const page of pages) {
+    const decoded = decodeURIComponent(page).toLowerCase().replace(/[^a-z0-9]/g, '');
+    if (episode && !decoded.includes(episode)) continue;
+    const detail = await N.call('GET', base + page, {});
+    const link = /<a\b(?=[^>]*\bid=["']download_ml["'])(?=[^>]*\bhref=["']([^"']+\.srt(?:\?[^"']*)?)["'])[^>]*>/i.exec(detail)?.[1];
+    if (link && /^\/?subs\/\d+\//.test(link)) return new URL(link, base).href;
+  }
+  return '';
+}
+
+// Start an official SubDL translation only on an explicit Malayalam request.
+// The existing SubDL key needs a paid translation entitlement and quota.
+export async function translateMalayalam(item, progress = () => {}) {
+  const key = (setting('subdlKey') || '').trim();
+  if (!key) throw new Error('A SubDL key with a paid translation plan is needed in Settings > Subtitles.');
+  const source = (await searchSubs(item, ['en'])).find((r) => r.source === 'SubDL' && r.nId && r.fileNId);
+  if (!source) throw new Error('No matching English subtitle was found to translate.');
+  const root = 'https://api.subdl.com/api/v2/ai/translations';
+  const headers = { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json', Accept: 'application/json' };
+  const getJson = async (method, url, body) => {
+    const response = JSON.parse(await N.call(method, url, headers, body ? JSON.stringify(body) : ''));
+    if (response.error && !response.job) throw new Error(response.message || response.error);
+    return response;
+  };
+  const data = await getJson('POST', root,
+    { n_id: source.nId, file_n_id: source.fileNId, target_language: 'ML', format: 'srt' });
+  const id = data.request_id || data.job?.id;
+  if (!id || !/^[\w-]+$/.test(id)) throw new Error('The translation service did not start a job.');
+  for (let attempt = 0; attempt < 45; attempt++) {
+    const job = attempt === 0 ? data.job : (await getJson('GET', root + '/' + id)).job;
+    if (job?.download_ready) return root + '/' + id + '/download?api_key=' + encodeURIComponent(key);
+    if (['failed', 'aborted'].includes(job?.status)) throw new Error(job.error || 'Translation failed.');
+    progress(job?.progress || 0);
+    await new Promise((resolve) => setTimeout(resolve, 2000));
+  }
+  throw new Error('Translation is still processing. Try Malayalam again shortly.');
 }
 
 export async function loadOnline(result, stillCurrent = () => true) {

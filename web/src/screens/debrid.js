@@ -8,7 +8,7 @@ import { icon, toast, sheet, form } from '../ui.js';
 import { focus, focusFirst } from '../nav.js';
 import { playVod } from '../player.js';
 import * as N from '../native.js';
-import { hasKey, searchSubs, subtitleLink, langName } from '../subs.js';
+import { hasKey, searchSubs, subtitleLink, subtitleCatMalayalam, translateMalayalam, langName } from '../subs.js';
 
 const displayName = (f) => f.name.split('/').pop();
 const groupCard = (g) => `<button class="f db-collection" data-action="open-series" data-id="${esc(g.id)}"><span class="db-art">${icon('series')}</span><span><b>${esc(g.title)}</b><small>Season ${g.season} · ${g.files.length} videos · episode order ready</small></span><span>Open →</span></button>`;
@@ -58,29 +58,40 @@ export async function playDebrid(fileId, playlistId = '', app, groupIds = null) 
   try {
     const item = await playableFile(fileId);
     let subtitle = '';
-    if (chosen !== 'lumen' && !hasKey())
+    if (chosen !== 'lumen' && !hasKey() && language !== 'ml')
       toast('Add a SubDL or OpenSubtitles key in Settings > Subtitles for online subtitles.', 'err');
-    if (chosen !== 'lumen' && hasKey()) {
+    if (chosen !== 'lumen' && (hasKey() || language === 'ml')) {
       const lang = language;
       toast(`Finding ${langName(lang)} subtitles…`);
       try {
-        const matches = await Promise.race([searchSubs({ title: item.title, url: item.url }, [lang]),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Subtitle search timed out')), 15000))]);
+        const matches = hasKey() ? await Promise.race([searchSubs({ title: item.title, url: item.url }, [lang]),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Subtitle search timed out')), 15000))]) : [];
         if (matches.length) {
           const found = await subtitleLink(matches[0]);
           subtitle = await N.prepareSubtitle(found.link);
         } else if (lang === 'ml') {
-          const fallback = await sheet({ title: 'No Malayalam subtitle found', options: [
-            { label: 'Open SubtitleCat to translate manually', hint: 'Download the Malayalam SRT on its website', value: 'cat' },
-            { label: 'Play without online subtitles', value: 'play' },
-          ] });
-          if (fallback === 'cat') {
-            N.openUrl('https://www.subtitlecat.com/index.php?search=' + encodeURIComponent(item.title));
-            return;
+          // SubtitleCat can supply existing Malayalam translations directly.
+          // When absent, the supported SubDL API can create one with a paid key.
+          let cat = '';
+          try { cat = await subtitleCatMalayalam(item); } catch { /* site may be unavailable */ }
+          if (cat) subtitle = await N.prepareSubtitle(cat);
+          else {
+            toast('No ready Malayalam track. Translating an English subtitle…');
+            const translated = await translateMalayalam(item, (percent) => {
+              if (percent && percent % 20 < 3) toast(`Translating Malayalam subtitle: ${percent}%`);
+            });
+            subtitle = await N.prepareSubtitle(translated);
           }
-          if (!fallback) return;
         } else toast('No English subtitle found. Opening the video.', 'err');
-      } catch (e) { toast(`Subtitles unavailable: ${e.message}. Opening the video.`, 'err'); }
+      } catch (e) {
+        if (lang === 'ml') {
+          const choice = await sheet({ title: 'Malayalam subtitle unavailable', options: [
+            { label: 'Play without Malayalam subtitles', hint: e.message, value: 'play' },
+            { label: 'Cancel', value: 'cancel' },
+          ] });
+          if (choice !== 'play') return;
+        } else toast(`Subtitles unavailable: ${e.message}. Opening the video.`, 'err');
+      }
     }
     const queue = p && p.autoplay !== false && index >= 0
       ? p.items.slice(index + 1).map((id) => ({
