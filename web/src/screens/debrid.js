@@ -62,6 +62,7 @@ export class DebridScreen {
       // Remote navigation uses the app's transform-based scroll engine.
     });
     if (accounts().ad?.key) this.refresh(false);
+    this.timer = setInterval(() => { if (!this.dead && accounts().ad?.key) this.refresh(false); }, 60000);
   }
   async refresh(force) {
     if (!accounts().ad?.key) return;
@@ -150,5 +151,5 @@ export class DebridScreen {
   focus() { focusFirst(this.view); }
   save() { return { mode: this.mode, playlistId: this.playlistId, query: this.query, sort: this.sort }; }
   destroy() { this.dead = true; document.removeEventListener('debrid-library-changed', this.listener);
-    document.removeEventListener('debrid-account-changed', this.listener); }
+    document.removeEventListener('debrid-account-changed', this.listener); clearInterval(this.timer); }
 }

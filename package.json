@@ -3,7 +3,7 @@
   "version": "1.0.0",
   "description": "Lumen TV: fast IPTV player for Android TV and Fire TV",
   "scripts": {
-    "test": "node tools/test-torrents.cjs && node --experimental-vm-modules tools/test-debrid.cjs && node --experimental-vm-modules tools/test-subtitles.cjs",
+    "test": "node tools/test-torrents.cjs && node --experimental-vm-modules tools/test-debrid.cjs && node --experimental-vm-modules tools/test-subtitles.cjs && node tools/test-debrid-ui.cjs",
     "build": "./tools/build-web.sh",
     "shots": "python3 -I tools/shoot.py build/shots"
   },

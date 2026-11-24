@@ -86,6 +86,9 @@ export class SearchScreen {
     document.addEventListener('debrid-library-changed', this.dbListener);
     this.applyTab(); this.paint();
     if (accounts().ad?.key) refreshLibrary().catch(() => {});
+    this.dbTimer = setInterval(() => {
+      if (!this.dead && this.tab === 'debrid' && accounts().ad?.key) refreshLibrary().catch(() => {});
+    }, 60000);
   }
 
   paint() {
@@ -362,7 +365,7 @@ export class SearchScreen {
     focus(this.view.querySelector('.key'));
   }
   save() { return { q: this.q, tab: this.tab, lastTorrent: this.lastTorrent }; }
-  destroy() { this.dead = true; ++this.tvToken; ++this.torrentToken; clearTimeout(this.torrentTimer); this.run.cancel(); document.removeEventListener('debrid-library-changed', this.dbListener); }
+  destroy() { this.dead = true; ++this.tvToken; ++this.torrentToken; clearTimeout(this.torrentTimer); clearInterval(this.dbTimer); this.run.cancel(); document.removeEventListener('debrid-library-changed', this.dbListener); }
 }
 
 export function tryLines() {
