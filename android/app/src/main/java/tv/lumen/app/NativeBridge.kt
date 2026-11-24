@@ -352,6 +352,14 @@ class NativeBridge(private val act: MainActivity) {
         val uri = Uri.parse(url)
         val subtitleUri = o.optString("subtitle").takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
             ?.takeIf { it.scheme == "content" && it.authority == "${act.packageName}.files" }
+        val vlcSubtitleUrl = if (pkg == "org.videolan.vlc" && subtitleUri != null) {
+            val segments = subtitleUri.pathSegments
+            val name = segments.getOrNull(1)
+            if (segments.size == 2 && segments[0] == "subtitles" && name != null &&
+                Regex("^[A-Za-z0-9._-]+\\.srt$", RegexOption.IGNORE_CASE).matches(name))
+                runCatching { act.server.publishSubtitle(File(File(act.cacheDir, "subs"), name)) }.getOrNull()
+            else null
+        } else null
         val pm = act.packageManager
         fun base(type: String?): Intent = Intent(Intent.ACTION_VIEW).apply {
             if (type != null) setDataAndType(uri, type) else data = uri
@@ -364,7 +372,7 @@ class NativeBridge(private val act: MainActivity) {
                 // video itself is a remote URL in Intent.data.
                 clipData = ClipData.newUri(act.contentResolver, "Lumen subtitles", subtitleUri)
                 addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
-                putExtra("subtitles_location", subtitleUri.toString()) // VLC
+                putExtra("subtitles_location", vlcSubtitleUrl ?: subtitleUri.toString()) // VLC reads a URL string
                 putExtra("subs", arrayOf(subtitleUri))                 // MX Player
                 putExtra("subs.name", arrayOf("Lumen subtitles"))
                 putExtra("subs.filename", arrayOf("Lumen.srt"))

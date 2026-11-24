@@ -110,6 +110,7 @@ class VlcHandoffTest {
                 waitFor("VLC did not play with the supplied subtitle",30000){dismissVlcTips();vlcPlaying()}
                 settleVlc()
                 Thread.sleep(1600);screenshot("vlc-subtitle-video.png")
+                assertTrue("Installed VLC never requested the hosted subtitle",act.server.subtitleReads.get()>0)
                 shell("am force-stop org.videolan.vlc")
                 shell("am start -n tv.lumen.app/.MainActivity")
                 waitFor("Lumen did not reopen after subtitle test"){shell("dumpsys activity activities").lineSequence().any{it.contains("mResumedActivity")&&it.contains("tv.lumen.app")}}

@@ -3,6 +3,10 @@ package tv.lumen.app
 import org.json.JSONObject
 import java.io.BufferedInputStream
 import java.io.InputStream
+import java.io.File
+import java.security.SecureRandom
+import java.util.concurrent.ConcurrentHashMap
+import java.util.concurrent.atomic.AtomicInteger
 import java.net.Inet4Address
 import java.net.NetworkInterface
 import java.net.ServerSocket
@@ -19,6 +23,20 @@ class LocalServer(private val onMessage: (JSONObject) -> Unit) {
     val port = 8899
     val pin = (1000..9999).random().toString()
     @Volatile private var server: ServerSocket? = null
+
+    private val subtitleFiles = ConcurrentHashMap<String, Pair<File, Long>>()
+    val subtitleReads = AtomicInteger()
+    private val random = SecureRandom()
+
+    /** VLC can load HTTP subtitle paths even when it cannot open an app-private content URI. */
+    fun publishSubtitle(file: File): String {
+        require(server != null) { "Local subtitle server is unavailable" }
+        require(file.isFile && file.length() in 20..5_000_000 && file.extension.equals("srt", true))
+        val token = ByteArray(20).also(random::nextBytes).joinToString("") { "%02x".format(it.toInt() and 255) }
+        for ((key, value) in subtitleFiles) if (value.second < System.currentTimeMillis()) subtitleFiles.remove(key, value)
+        subtitleFiles[token] = file to (System.currentTimeMillis() + 3 * 60 * 60 * 1000L)
+        return "http://127.0.0.1:$port/subtitles/$token.srt"
+    }
 
     fun start() {
         if (server != null) return
@@ -63,6 +81,21 @@ class LocalServer(private val onMessage: (JSONObject) -> Unit) {
             }
             val parts = requestLine.split(" ")
             val method = parts.getOrNull(0) ?: "GET"
+            val path = parts.getOrNull(1).orEmpty().substringBefore('?')
+            if (path.startsWith("/subtitles/")) {
+                val token = Regex("^/subtitles/([0-9a-f]{40})\\.srt$").matchEntire(path)?.groupValues?.get(1)
+                val entry = token?.let(subtitleFiles::get)
+                val file = entry?.let { pair -> pair.first.takeIf { pair.second > System.currentTimeMillis() && it.isFile && it.length() in 20..5_000_000 } }
+                val valid = c.inetAddress.isLoopbackAddress && method in listOf("GET", "HEAD") && file != null
+                val out = c.getOutputStream()
+                if (valid) {
+                    val bytes = file!!.readBytes()
+                    out.write("HTTP/1.1 200 OK\\r\\nContent-Type: application/x-subrip; charset=utf-8\\r\\nContent-Length: ${bytes.size}\\r\\nCache-Control: no-store\\r\\nConnection: close\\r\\n\\r\\n".toByteArray())
+                    if (method == "GET") { subtitleReads.incrementAndGet(); out.write(bytes) }
+                } else out.write("HTTP/1.1 404 Not Found\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n".toByteArray())
+                out.flush()
+                return
+            }
             var msg = ""
             if (method == "POST" && length in 1..65536) {
                 val buf = ByteArray(length)
