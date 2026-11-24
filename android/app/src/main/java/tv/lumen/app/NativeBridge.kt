@@ -15,6 +15,7 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.webkit.JavascriptInterface
+import androidx.core.content.FileProvider
 import org.json.JSONObject
 import org.json.JSONArray
 import java.io.File
@@ -335,6 +336,8 @@ class NativeBridge(private val act: MainActivity) {
         val magnet = o.optString("mode") == "magnet"
         val pos = o.optLong("position", 0)
         val uri = Uri.parse(url)
+        val subtitleUri = o.optString("subtitle").takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
+            ?.takeIf { it.scheme == "content" && it.authority == "${act.packageName}.files" }
         val pm = act.packageManager
         fun base(type: String?): Intent = Intent(Intent.ACTION_VIEW).apply {
             if (type != null) setDataAndType(uri, type) else data = uri
@@ -342,6 +345,19 @@ class NativeBridge(private val act: MainActivity) {
             addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
             putExtra("title", title)
             putExtra(Intent.EXTRA_TITLE, title)
+            if (!download && subtitleUri != null) {
+                // ClipData grants the receiver access to this cache file even though the
+                // video itself is a remote URL in Intent.data.
+                clipData = ClipData.newUri(act.contentResolver, "Lumen subtitles", subtitleUri)
+                addFlags(Intent.FLAG_GRANT_READ_URI_PERMISSION)
+                putExtra("subtitles_location", subtitleUri.toString()) // VLC
+                putExtra("subs", arrayOf(subtitleUri))                 // MX Player
+                putExtra("subs.name", arrayOf("Lumen subtitles"))
+                putExtra("subs.filename", arrayOf("Lumen.srt"))
+                putExtra("subs.enable", arrayOf(subtitleUri))
+                putExtra("subtitle_uri", arrayOf(subtitleUri))         // Just Player
+                putExtra("subtitle_name", arrayOf("Lumen subtitles"))
+            }
             if (download) {
                 putExtra("filename", file)
                 putExtra("android.intent.extra.FILENAME", file)
@@ -427,6 +443,27 @@ class NativeBridge(private val act: MainActivity) {
     }
 
     // ---------- subtitles and tracks ----------
+    @JavascriptInterface
+    fun prepareSubtitle(id: Int, url: String) {
+        io.execute {
+            try {
+                require(url.startsWith("https://")) { "Invalid subtitle link" }
+                val dir = File(act.cacheDir, "subs").apply { mkdirs() }
+                dir.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 3 * 86400000L }?.forEach { it.delete() }
+                val ext = Regex("\\.(srt|vtt)(\\?|$)", RegexOption.IGNORE_CASE).find(url)?.groupValues?.get(1)?.lowercase() ?: "srt"
+                val file = File(dir, "external-${System.currentTimeMillis()}-$id.$ext")
+                try {
+                    Net.download(url, file)
+                    require(file.length() in 1..5_000_000) { "Subtitle file is empty or too large" }
+                    bodies[id] = FileProvider.getUriForFile(act, "${act.packageName}.files", file).toString()
+                    emit("call", JSONObject().put("id", id).put("ok", true))
+                } catch (e: Exception) { file.delete(); throw e }
+            } catch (e: Exception) {
+                emit("call", JSONObject().put("id", id).put("ok", false).put("error", e.message ?: "Subtitle download failed"))
+            }
+        }
+    }
+
     @JavascriptInterface
     fun subtitleHash(id: Int, url: String) {
         io.execute {

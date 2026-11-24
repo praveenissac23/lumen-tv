@@ -7,6 +7,7 @@ import { icon, toast, sheet, form } from '../ui.js';
 import { focus, focusFirst } from '../nav.js';
 import { playVod } from '../player.js';
 import * as N from '../native.js';
+import { hasKey, searchSubs, subtitleLink, langName } from '../subs.js';
 
 const displayName = (f) => f.name.split('/').pop();
 const fileCard = (f, index = -1) => `<div class="db-card ${index === 0 ? 'db-first' : ''}">
@@ -14,7 +15,8 @@ const fileCard = (f, index = -1) => `<div class="db-card ${index === 0 ? 'db-fir
   <span class="db-copy"><b>${esc(displayName(f))}</b><small>${esc(f.source === 'saved' ? 'Saved link' : f.magnetName || 'AllDebrid')} · ${bytes(f.size)}</small></span>
   <span class="db-actions"><button class="f db-button db-play" data-action="play" data-file="${esc(f.id)}">${icon('play')} Play</button>
   ${index < 0 ? `<button class="f db-button" data-action="add" data-file="${esc(f.id)}">${icon('plus')} Add to playlist</button>`
-    : `<button class="f db-button" data-action="up" data-index="${index}">↑</button><button class="f db-button" data-action="down" data-index="${index}">↓</button><button class="f db-button" data-action="remove" data-index="${index}">Remove</button>`}</span></div>`;
+    : `<button class="f db-button" data-action="up" data-index="${index}">↑</button><button class="f db-button" data-action="down" data-index="${index}">↓</button><button class="f db-button" data-action="remove" data-index="${index}">Remove</button>`}
+  <button class="f db-button" data-action="download" data-file="${esc(f.id)}">${icon('download')} Download</button></span></div>`;
 
 export async function addFileToPlaylist(fileId) {
   const opts = playlists().map((p) => ({ label: p.name, hint: p.items.length + ' files', value: p.id }));
@@ -35,12 +37,42 @@ export async function playDebrid(fileId, playlistId = '', app) {
   const p = savedPlaylist(playlistId);
   const index = p ? p.items.indexOf(fileId) : -1;
   const choices = [{ label: 'Lumen TV player', hint: index >= 0 && p.autoplay !== false ? 'Plays the next playlist file automatically' : 'Plays here with online subtitles', value: 'lumen', icon: 'play' },
-    ...N.installedApps().filter((a) => a.role === 'player').map((a) => ({ label: a.name, hint: 'Plays this file in the external app', value: a.pkg, icon: 'external' }))];
+    ...N.installedApps().filter((a) => a.role === 'player').flatMap((a) => [
+      { label: a.name, hint: 'Searches English subtitles automatically', value: a.pkg, icon: 'external' },
+      { label: `${a.name} · Malayalam subtitles`, hint: 'Search Malayalam only when selected', value: a.pkg + '|ml', icon: 'subtitles' },
+    ])];
   const chosen = await sheet({ title: 'Play in which player?', options: choices });
   if (!chosen) return;
+  const language = chosen.endsWith('|ml') ? 'ml' : 'en';
+  const playerPkg = chosen.replace(/\|ml$/, '');
   toast('Getting a fresh AllDebrid playback link…');
   try {
     const item = await playableFile(fileId);
+    let subtitle = '';
+    if (chosen !== 'lumen' && !hasKey())
+      toast('Add a SubDL or OpenSubtitles key in Settings > Subtitles for online subtitles.', 'err');
+    if (chosen !== 'lumen' && hasKey()) {
+      const lang = language;
+      toast(`Finding ${langName(lang)} subtitles…`);
+      try {
+        const matches = await Promise.race([searchSubs({ title: item.title, url: item.url }, [lang]),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('Subtitle search timed out')), 15000))]);
+        if (matches.length) {
+          const found = await subtitleLink(matches[0]);
+          subtitle = await N.prepareSubtitle(found.link);
+        } else if (lang === 'ml') {
+          const fallback = await sheet({ title: 'No Malayalam subtitle found', options: [
+            { label: 'Open SubtitleCat to translate manually', hint: 'Download the Malayalam SRT on its website', value: 'cat' },
+            { label: 'Play without online subtitles', value: 'play' },
+          ] });
+          if (fallback === 'cat') {
+            N.openUrl('https://www.subtitlecat.com/index.php?search=' + encodeURIComponent(item.title));
+            return;
+          }
+          if (!fallback) return;
+        } else toast('No English subtitle found. Opening the video.', 'err');
+      } catch (e) { toast(`Subtitles unavailable: ${e.message}. Opening the video.`, 'err'); }
+    }
     const queue = p && p.autoplay !== false && index >= 0
       ? p.items.slice(index + 1).map((id) => ({
         item: { title: displayName(fileById(id) || { name: 'Next file' }) },
@@ -48,8 +80,26 @@ export async function playDebrid(fileId, playlistId = '', app) {
       })) : [];
     // Play queues need the built-in player to detect the end of each video.
     playVod(item, 'debrid:' + fileId, () => app?.reload(), chosen === 'lumen' ? queue : [],
-      { forceBuiltIn: chosen === 'lumen', playerPkg: chosen === 'lumen' ? null : chosen });
+      { forceBuiltIn: chosen === 'lumen', playerPkg: chosen === 'lumen' ? null : playerPkg, subtitle });
   } catch (e) { toast('Debrid playback: ' + e.message, 'err'); }
+}
+
+export async function downloadDebrid(fileId) {
+  const f = fileById(fileId);
+  if (!f) return toast('Refresh the Debrid library and try again.', 'err');
+  const managers = N.installedApps().filter((a) => a.role === 'download');
+  const pkg = await sheet({ title: 'Download with', options: [
+    ...managers.map((a) => ({ label: a.name, value: a.pkg, icon: 'download' })),
+    { label: 'Choose another download app', value: 'chooser', icon: 'external' },
+  ] });
+  if (!pkg) return;
+  try {
+    toast('Getting a fresh download link…');
+    const item = await playableFile(fileId);
+    const ok = N.openWith(pkg === 'chooser' ? '' : pkg, item.url,
+      { title: displayName(f), file: displayName(f), mode: 'download' });
+    if (ok === false) toast('That download app could not open the link.', 'err');
+  } catch (e) { toast('Debrid download: ' + e.message, 'err'); }
 }
 
 export class DebridScreen {
@@ -149,6 +199,7 @@ export class DebridScreen {
     if (a === 'addmore' || a === 'back') { this.playlistId = ''; this.mode = 'files'; return this.paint(); }
     if (a === 'open') { this.playlistId = b.dataset.id; return this.paint(); }
     if (a === 'add') { if (await addFileToPlaylist(id) && !this.dead) { this.restoreFocus = b; this.paint(); } return; }
+    if (a === 'download') return downloadDebrid(id);
     if (a === 'play') return playDebrid(id, p?.id || '', this.app);
     if (a === 'playall') { const first = p.items.find(fileById); if (first) return playDebrid(first, p.id, this.app); return toast('Add a playable file first'); }
     if (a === 'autoplay') { savePlaylist({ ...p, autoplay: p.autoplay === false }); return this.paint(); }

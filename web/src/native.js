@@ -228,8 +228,8 @@ export function installedApps() {
   return KNOWN_APPS.filter((a) => ['com.dv.adm', 'idm.internet.download.manager', 'org.videolan.vlc', 'com.mxtech.videoplayer.ad'].includes(a.pkg));
 }
 // mode: 'play' | 'download'; pkg '' opens Android's app chooser
-export function openWith(pkg, url, { title = '', file = '', mode = 'play', position = 0, torrent = false } = {}) {
-  if (N) return N.openWith(pkg, url, JSON.stringify({ title, file, mode, position, ...(torrent?{torrent:true}:{}) }));
+export function openWith(pkg, url, { title = '', file = '', mode = 'play', position = 0, torrent = false, subtitle = '' } = {}) {
+  if (N) return N.openWith(pkg, url, JSON.stringify({ title, file, mode, position, subtitle, ...(torrent?{torrent:true}:{}) }));
   window.open(url, '_blank');
   return true;
 }
@@ -260,6 +260,11 @@ export function tracks() { if (N) { try { return JSON.parse(N.tracks()); } catch
 export function selectTrack(type, id) { if (N) N.selectTrack(type, String(id)); }
 // Download a subtitle file natively and attach it to the current video
 export function loadSubtitle(url, lang, name) { if (N) N.loadSubtitle(url, lang || 'und', name || ''); }
+export function prepareSubtitle(url) {
+  if (!N?.prepareSubtitle) return Promise.resolve('');
+  const id = ++seq;
+  return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); N.prepareSubtitle(id, url); });
+}
 export function subtitleHash(url) {
   if (!N) return Promise.resolve(null);
   const id = ++seq;

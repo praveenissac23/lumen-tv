@@ -7,18 +7,25 @@ const bundle = esbuild.buildSync({ stdin: {
     import {SearchScreen} from './web/src/screens/searchview.js';
     import * as db from './web/src/debrid-library.js';
     import {saveAccount} from './web/src/torrents.js';
-    window.test={DebridScreen,SearchScreen,db,saveAccount};`,
+    import {setting} from './web/src/store.js';
+    window.test={DebridScreen,SearchScreen,db,saveAccount,setting};`,
   resolveDir: process.cwd(),
 }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
 const dom = new JSDOM('<!doctype html><div id="stage"><main id="view"></main><div id="overlays"></div><div id="toast"></div></div>',
   { url: 'https://lumen.test', runScripts: 'outside-only', pretendToBeVisual: true });
-const w = dom.window, disk = new Map(), responses = new Map(), external = [];
+const w = dom.window, disk = new Map(), responses = new Map(), external = [], subtitleRequests = [];
 w.Native = {
   cacheRead: (key) => disk.get(key) || null,
   cacheWrite: (key, value) => disk.set(key, value),
   deviceInfo: () => '{}',
-  apps: () => JSON.stringify([{ pkg: 'org.videolan.vlc', name: 'VLC', role: 'player' }]),
+  apps: () => JSON.stringify([{ pkg: 'org.videolan.vlc', name: 'VLC', role: 'player' },
+    { pkg: 'idm.internet.download.manager', name: '1DM', role: 'download' }]),
   openWith: (...args) => { external.push(args); return true; },
+  subtitleHash: (id) => Promise.resolve().then(() => w.__nat('head', { id, ok: true, hash: 'test-hash' })),
+  prepareSubtitle: (id, url) => {
+    subtitleRequests.push(url); responses.set(id, 'content://tv.lumen.app.files/subtitles/malayalam.srt');
+    Promise.resolve().then(() => w.__nat('call', { id, ok: true }));
+  },
   call: (id, method, url, headers, body) => {
     let data;
     if (url.endsWith('/magnet/status')) data = { status: 'success', data: { magnets:
@@ -30,6 +37,12 @@ w.Native = {
           l: `https://alldebrid.com/f/${magnetId}` }] })) } };
     } else if (url.endsWith('/user/links')) data = { status: 'success', data: { links: [] } };
     else if (url.endsWith('/link/unlock')) data = { status: 'success', data: { link: 'https://cdn.example/video.mkv' } };
+    else if (url.includes('api.subdl.com')) {
+      const lang = url.includes('languages=ML') ? 'ml' : 'en';
+      data = { status: true, subtitles: [{ unpack_files: [
+        { url: '/subtitle/test/' + lang, name: 'Video 01.srt', language: lang.toUpperCase(), format: 'srt' },
+      ] }] };
+    }
     else throw Error('Unexpected ' + url);
     responses.set(id, JSON.stringify(data));
     Promise.resolve().then(() => w.__nat('call', { id, ok: true }));
@@ -37,7 +50,7 @@ w.Native = {
   take: (id) => { const result = responses.get(id); responses.delete(id); return result; },
 };
 w.eval(bundle);
-const { DebridScreen, SearchScreen, db, saveAccount } = w.test;
+const { DebridScreen, SearchScreen, db, saveAccount, setting } = w.test;
 const app = { go() {}, back() {}, reload() {}, openVoice() {} };
 (async () => {
   saveAccount('ad', 'test-account');
@@ -60,11 +73,23 @@ const app = { go() {}, back() {}, reload() {}, openVoice() {} };
   w.document.querySelectorAll('#overlays .sheet-item')[2].click();
   await sorting;
   assert.equal(screen.sort, 'name', 'file name sort is selectable');
+  setting('subdlKey', 'test-subdl-key');
   const opening = screen.action(view.querySelector('[data-action="play"]'));
   assert.ok([...w.document.querySelectorAll('#overlays .sheet-item')].some((b) => b.textContent.includes('VLC')));
-  [...w.document.querySelectorAll('#overlays .sheet-item')].find((b) => b.textContent.includes('VLC')).click();
+  [...w.document.querySelectorAll('#overlays .sheet-item')].find((b) => b.textContent.includes('VLC · Malayalam')).click();
   await opening;
   assert.equal(external[0][0], 'org.videolan.vlc', 'Debrid file opens in selected player');
+  assert.ok(subtitleRequests[0].includes('/subtitle/test/ml'), 'Malayalam subtitle downloaded before VLC starts');
+  assert.equal(JSON.parse(external[0][2]).subtitle, 'content://tv.lumen.app.files/subtitles/malayalam.srt');
+  const english = screen.action(view.querySelector('[data-action="play"]'));
+  [...w.document.querySelectorAll('#overlays .sheet-item')].find((b) => b.textContent.includes('VLC') && !b.textContent.includes('Malayalam')).click();
+  await english;
+  assert.ok(subtitleRequests[1].includes('/subtitle/test/en'), 'ordinary VLC play searches English without a language prompt');
+  const downloading = screen.action(view.querySelector('[data-action="download"]'));
+  [...w.document.querySelectorAll('#overlays .sheet-item')].find((b) => b.textContent.includes('1DM')).click();
+  await downloading;
+  assert.equal(external[2][0], 'idm.internet.download.manager', 'Debrid download opens 1DM');
+  assert.equal(JSON.parse(external[2][2]).mode, 'download');
   screen.playlistId = 'p'; screen.paint();
   assert.equal(view.querySelectorAll('.db-card .db-play').length, 3);
   view.querySelector('[data-action="down"]').click();

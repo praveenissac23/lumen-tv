@@ -25,8 +25,6 @@ export async function searchSubs(item, langs = setting('subLangs')) {
   const sdKey = (setting('subdlKey') || '').trim();
   const q = new URLSearchParams();
   q.set('languages', (langs && langs.length ? langs : ['en']).join(','));
-  let hash = null;
-  if (item.url) { try { hash = await N.subtitleHash(item.url); } catch { hash = null; } }
   const results = [];
   const run = async (params) => {
     const text = await N.call('GET', `${API}/subtitles?${params}`, headers());
@@ -40,12 +38,23 @@ export async function searchSubs(item, langs = setting('subLangs')) {
   };
   const work = [];
   if (osKey) work.push((async () => {
-    if (hash) { const p = new URLSearchParams(q); p.set('moviehash', hash.hash); await run(p).catch(() => {}); }
     const p = new URLSearchParams(q);
     p.set('query', item.title);
     if (item.season) { p.set('season_number', item.season); p.set('episode_number', item.episode); p.set('type', 'episode'); }
     else { if (item.year) p.set('year', item.year); p.set('type', 'movie'); }
-    await run(p);
+    const titleSearch = run(p);
+    const exactSearch = item.url ? (async () => {
+      let timer;
+      const hash = await Promise.race([
+        N.subtitleHash(item.url).catch(() => null),
+        new Promise((resolve) => { timer = setTimeout(() => resolve(null), 3500); }),
+      ]);
+      clearTimeout(timer);
+      if (!hash) return;
+      const byHash = new URLSearchParams(q); byHash.set('moviehash', hash.hash);
+      await run(byHash).catch(() => {});
+    })() : Promise.resolve();
+    await Promise.all([titleSearch, exactSearch]);
   })());
   if (sdKey) work.push((async () => {
     const p = new URLSearchParams({ api_key: sdKey, languages: (langs?.length ? langs : ['en']).join(',').toUpperCase(),
@@ -81,14 +90,17 @@ export async function searchSubs(item, langs = setting('subLangs')) {
 }
 
 export async function loadOnline(result, stillCurrent = () => true) {
-  if (result.source === 'SubDL') {
-    if (stillCurrent()) N.loadSubtitle(result.url, result.lang, result.name);
-    return { link: result.url };
-  }
+  const d = await subtitleLink(result);
+  if (stillCurrent()) N.loadSubtitle(d.link, result.lang, result.name);
+  return d;
+}
+
+// Resolve the same ranked subtitle for either the built-in player or an external app.
+export async function subtitleLink(result) {
+  if (result.source === 'SubDL') return { link: result.url };
   const text = await N.call('POST', `${API}/download`, headers(), JSON.stringify({ file_id: result.fileId }));
   const d = JSON.parse(text);
   if (!d.link) throw new Error(d.message || 'Download limit reached for today');
-  if (stillCurrent()) N.loadSubtitle(d.link, result.lang, result.name);
   return d;
 }
 

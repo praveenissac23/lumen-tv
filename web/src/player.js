@@ -208,7 +208,7 @@ export function playCatchup(ch, prog, list, onExit) {
 }
 
 // item: {title, url, poster, kind, id, sub}
-export function playVod(item, resumeKey, onExit, queue, { forceBuiltIn = false, playerPkg = null } = {}) {
+export function playVod(item, resumeKey, onExit, queue, { forceBuiltIn = false, playerPkg = null, subtitle = '' } = {}) {
   const section = item.kind === 'episode' || (resumeKey && resumeKey.startsWith('ep:')) ? 'series' : 'movie';
   const saved = resumeKey && progressOf(resumeKey);
   const title = item.sub && section === 'series' ? `${item.title} – ${item.sub}` : item.title;
@@ -217,7 +217,7 @@ export function playVod(item, resumeKey, onExit, queue, { forceBuiltIn = false, 
     ...(item.torrentItem ? { torrentItem: item.torrentItem, torrentEpisode: item.torrentEpisode } : {}) });
   if (playerPkg && !P.mode) {
     if (P.previewCh) stopPreview();
-    const ok = N.openWith(playerPkg, urlOr(item.url), { title, mode: 'play', position: saved ? Math.round(saved.pos) : 0 });
+    const ok = N.openWith(playerPkg, urlOr(item.url), { title, mode: 'play', position: saved ? Math.round(saved.pos) : 0, subtitle });
     if (ok !== false) { P.ext = { item, resumeKey, startedAt: Date.now() }; return; }
     toast('That player could not open this video. Playing in Lumen TV.', 'err');
   }
@@ -462,6 +462,13 @@ async function subtitleMenu() {
   if (v === 'online' || v === 'search-title') {
     if (!hasKey()) { toast('Add a SubDL or OpenSubtitles key in Settings > Subtitles.', 'err'); return; }
     let query = subItem(P.item);
+    const language = await sheet({ title: 'Subtitle language', options: [
+      { label: 'English', value: 'en', icon: 'subtitles' },
+      { label: 'Malayalam', value: 'ml', icon: 'subtitles' },
+      ...(setting('subLangs') || []).filter((x) => x !== 'en' && x !== 'ml').map((x) =>
+        ({ label: langName(x), value: x, icon: 'subtitles' })),
+    ] });
+    if (!language) return;
     if (v === 'search-title') {
       const result = await form({ title: 'Search subtitles by title',
         fields: [{ name: 'title', label: 'Film or series name', value: query.title || '', required: true }],
@@ -471,7 +478,7 @@ async function subtitleMenu() {
     }
     toast('Searching subtitles');
     try {
-      const r = await searchSubs(query);
+      const r = await searchSubs(query, [language]);
       if (!r.length) { toast('No subtitles found for this title'); return; }
       const pick = await sheet({ title: 'Online subtitles', options: r.slice(0, 30).map((x, i) => ({
         label: `${langName(x.lang)} · ${x.source}${x.hashMatch ? ' · exact file' : ''}`, hint: x.name.slice(0, 60), value: String(i), icon: x.hashMatch ? 'check' : 'subtitles' })) });

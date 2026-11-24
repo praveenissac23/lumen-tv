@@ -4,7 +4,7 @@ const vm = require('node:vm');
 const path = require('node:path');
 const calls = [], loaded = [];
 const settings = { osKey: 'os-key', subdlKey: 'sd-key', subLangs: ['en'], subAuto: false };
-const context = vm.createContext({ URLSearchParams, URL, JSON, Promise, Array, String, Error });
+const context = vm.createContext({ URLSearchParams, URL, JSON, Promise, Array, String, Error, setTimeout });
 const mod = new vm.SourceTextModule(fs.readFileSync(path.join(__dirname, '../web/src/subs.js'), 'utf8'), { context });
 const mocks = {
   './native.js': {
@@ -39,6 +39,9 @@ const mocks = {
   assert.equal(results.length, 1, 'only the matching episode subtitle');
   assert.equal(results[0].source, 'SubDL');
   assert.ok(calls.some((url) => url.includes('api.subdl.com') && url.includes('unpack=1')));
+  const external = await subs.subtitleLink(results[0]);
+  assert.equal(external.link, 'https://dl.subdl.com/subtitle/parent/ep2');
+  assert.equal(loaded.length, 0, 'external player subtitle lookup does not attach to Lumen player');
   await subs.loadOnline(results[0]);
   assert.equal(loaded[0][0], 'https://dl.subdl.com/subtitle/parent/ep2');
   console.log('Subtitle provider fixtures passed');
