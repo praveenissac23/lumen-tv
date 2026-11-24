@@ -20,6 +20,33 @@ export const fileById = (id) => snapshot.files.find((f) => f.id === id);
 export function allItems() {
   return [...snapshot.files].sort((a, b) => (b.added || 0) - (a.added || 0) || a.name.localeCompare(b.name));
 }
+// A series is recognised from the video name, not a magnet ID: uploads can contain
+// one episode, several episodes, or a single multi-episode video.
+export function seriesGroups(files = snapshot.files) {
+  const groups = new Map();
+  for (const file of files) {
+    const raw = (file.name || file.magnetName || '').split('/').pop()
+      .replace(/^www\.[^\s]+\s*[-–]\s*/i, '').replace(/\.[a-z0-9]{2,5}$/i, '');
+    const season = /\bS(?:eason)?[ ._-]*0*(\d{1,2})(?=[ ._-]|E|$)/i.exec(raw);
+    const episode = /\bS\d{1,2}[ ._-]*E0*(\d{1,3})(?:[ ._-]*[-–][ ._-]*0*(\d{1,3}))?|\bEP(?:isodes?)?[ ._-]*\(?0*(\d{1,3})(?:[ ._-]*[-–][ ._-]*0*(\d{1,3}))?\)?/i.exec(raw);
+    if (!season && !episode) continue;
+    const cut = Math.min(season?.index ?? raw.length, episode?.index ?? raw.length);
+    const title = raw.slice(0, cut).replace(/[\s._-]+$/g, '').replace(/[._]+/g, ' ').trim();
+    if (title.length < 3) continue;
+    const seasonNumber = season ? +season[1] : 1;
+    const start = +(episode?.[1] || episode?.[3] || 0);
+    const end = +(episode?.[2] || episode?.[4] || start);
+    const id = title.toLowerCase().replace(/[\s._-]+/g, ' ') + '|s' + seasonNumber;
+    if (!groups.has(id)) groups.set(id, { id, title, season: seasonNumber, files: [], added: 0 });
+    const g = groups.get(id);
+    g.files.push({ ...file, episodeStart: start, episodeEnd: end });
+    g.added = Math.max(g.added, file.added || 0);
+  }
+  return [...groups.values()].filter((g) => g.files.length > 1).map((g) => {
+    g.files.sort((a, b) => a.episodeStart - b.episodeStart || a.episodeEnd - b.episodeEnd || a.name.localeCompare(b.name, undefined, { numeric: true }));
+    return g;
+  }).sort((a, b) => b.added - a.added || a.title.localeCompare(b.title));
+}
 export function savedPlaylist(id) { return playlists().find((p) => p.id === id); }
 export function savePlaylist(p) {
   const others = playlists().filter((x) => x.id !== p.id);

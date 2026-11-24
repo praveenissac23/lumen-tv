@@ -7,8 +7,8 @@ const bundle = esbuild.buildSync({ stdin: {
     import {SearchScreen} from './web/src/screens/searchview.js';
     import * as db from './web/src/debrid-library.js';
     import {saveAccount} from './web/src/torrents.js';
-    import {setting} from './web/src/store.js';
-    window.test={DebridScreen,SearchScreen,db,saveAccount,setting};`,
+    import {setting,set} from './web/src/store.js';
+    window.test={DebridScreen,SearchScreen,db,saveAccount,setting,set};`,
   resolveDir: process.cwd(),
 }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
 const dom = new JSDOM('<!doctype html><div id="stage"><main id="view"></main><div id="overlays"></div><div id="toast"></div></div>',
@@ -29,11 +29,11 @@ w.Native = {
   call: (id, method, url, headers, body) => {
     let data;
     if (url.endsWith('/magnet/status')) data = { status: 'success', data: { magnets:
-      Array.from({ length: 69 }, (_, i) => ({ id: i + 1, filename: `Video ${String(i+1).padStart(2,'0')}`, statusCode: 4, completionDate: 100-i })) } };
+      Array.from({ length: 69 }, (_, i) => ({ id: i + 1, filename: i < 4 ? `The Court (2026) S01 EP (${i*4+1}-${i*4+4})` : `Video ${String(i+1).padStart(2,'0')}`, statusCode: 4, completionDate: 100-i })) } };
     else if (url.endsWith('/magnet/files')) {
       const fields = new URLSearchParams(body), ids = [...fields.values()];
       data = { status: 'success', data: { magnets: ids.map((magnetId) => ({ id: magnetId,
-        files: [{ n: `Video ${String(magnetId).padStart(2,'0')}.mkv`, s: 1200,
+        files: [{ n: +magnetId <= 4 ? `The Court (2026) S01 EP (${(+magnetId-1)*4+1}-${(+magnetId-1)*4+4}).mkv` : `Video ${String(magnetId).padStart(2,'0')}.mkv`, s: 1200,
           l: `https://alldebrid.com/f/${magnetId}` }] })) } };
     } else if (url.endsWith('/user/links')) data = { status: 'success', data: { links: [] } };
     else if (url.endsWith('/link/unlock')) data = { status: 'success', data: { link: 'https://cdn.example/video.mkv' } };
@@ -50,7 +50,7 @@ w.Native = {
   take: (id) => { const result = responses.get(id); responses.delete(id); return result; },
 };
 w.eval(bundle);
-const { DebridScreen, SearchScreen, db, saveAccount, setting } = w.test;
+const { DebridScreen, SearchScreen, db, saveAccount, setting, set } = w.test;
 const app = { go() {}, back() {}, reload() {}, openVoice() {} };
 (async () => {
   saveAccount('ad', 'test-account');
@@ -90,15 +90,26 @@ const app = { go() {}, back() {}, reload() {}, openVoice() {} };
   await downloading;
   assert.equal(external[2][0], 'idm.internet.download.manager', 'Debrid download opens 1DM');
   assert.equal(JSON.parse(external[2][2]).mode, 'download');
+  view.querySelector('[data-action="series"]').click();
+  assert.equal(view.querySelectorAll('[data-action="open-series"]').length, 1, 'series is grouped automatically');
+  view.querySelector('[data-action="open-series"]').click();
+  assert.equal(view.querySelectorAll('.db-card .db-play').length, 4, 'all episode packs appear in order');
+  assert.match(view.querySelectorAll('.db-card .db-copy b')[0].textContent, /\(1-4\)/);
+  set('progress', { ['debrid:' + db.library().files[1].id]: { pos: 40000, dur: 180000 } });
+  screen.paint();
+  assert.match(view.querySelector('[data-action="playall"]').textContent, /Continue series/);
+  assert.ok(view.querySelector('[data-action="playstart"]'), 'restarting a series remains available');
+  view.querySelector('[data-action="savegroup"]').click();
+  assert.equal(db.savedPlaylist(screen.playlistId).items.length, 4, 'one action saves the complete series');
   screen.playlistId = 'p'; screen.paint();
   assert.equal(view.querySelectorAll('.db-card .db-play').length, 3);
   view.querySelector('[data-action="down"]').click();
   assert.equal(db.savedPlaylist('p').items[0], db.library().files[1].id, 'reorder works via UI');
   screen.destroy();
   view.innerHTML = '';
-  const search = new SearchScreen(view, { q: 'Video 01' }, app);
+  const search = new SearchScreen(view, { q: 'Video 05' }, app);
   await search.switchTab('debrid');
-  assert.ok(view.querySelector('#sr-debrid').textContent.includes('Video 01'), 'search finds cloud file');
+  assert.ok(view.querySelector('#sr-debrid').textContent.includes('Video 05'), 'search finds cloud file');
   assert.equal(view.querySelector('.sr-debrid-pane').hidden, false);
   search.destroy();
   w.close();

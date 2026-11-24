@@ -55,6 +55,15 @@ async function main() {
   });
   await mod.evaluate();
   const d = mod.namespace;
+  const season = Array.from({ length: 48 }, (_, i) => ({
+    id: 'episode-' + (48 - i),
+    name: `www.1TamilMV.style - The Court (2026) S01 EP (${48 - i}).mkv`,
+    added: i,
+  }));
+  const groups = d.seriesGroups(season);
+  assert.equal(groups.length, 1, 'one group for a 48-video season from differently ordered uploads');
+  assert.equal(groups[0].files[0].episodeStart, 1, 'autoplay starts with episode 1');
+  assert.equal(groups[0].files.at(-1).episodeStart, 48, 'autoplay ends with episode 48');
   await d.refreshLibrary(true);
   assert.equal(d.library().magnets.length, 2, 'all uploads, including processing');
   assert.equal(d.library().files.length, 3, 'nested videos and saved link');
