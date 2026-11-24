@@ -16,5 +16,10 @@ SUBTITLE_OCR="$(tesseract "$ROOT/build/vlc-shots/vlc-tests/vlc-subtitle-video.pn
 printf '%s\n' "$SUBTITLE_OCR"
 printf '%s\n' "$SUBTITLE_OCR" | grep -Eiq 'LUMEN.*SUBTITLE.*HANDOFF.*TEST' || {
   echo "VLC played the video but did not visibly render the supplied SRT" >&2
+  echo "SUBTITLE_SCREENSHOT_B64_BEGIN"
+  base64 -w0 "$ROOT/build/vlc-shots/vlc-tests/vlc-subtitle-video.png"
+  echo
+  echo "SUBTITLE_SCREENSHOT_B64_END"
+  adb logcat -d -t 2500 | grep -Ei "subtitle|subrip|permission denied|no access|fileprovider" | tail -80 || true
   exit 1
 }
