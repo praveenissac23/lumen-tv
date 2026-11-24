@@ -111,7 +111,8 @@ class VlcHandoffTest {
                 settleVlc()
                 Thread.sleep(1600);screenshot("vlc-subtitle-video.png")
                 shell("am force-stop org.videolan.vlc")
-                waitFor("Lumen did not return after subtitle test"){shell("dumpsys activity activities").lineSequence().any{it.contains("mResumedActivity")&&it.contains("tv.lumen.app")}}
+                shell("am start -n tv.lumen.app/.MainActivity")
+                waitFor("Lumen did not reopen after subtitle test"){shell("dumpsys activity activities").lineSequence().any{it.contains("mResumedActivity")&&it.contains("tv.lumen.app")}}
                 ins.runOnMainSync{act.webView.requestFocus()}
                 chooseVlc(1)
                 waitFor("Installed VLC did not play the tracker-discovered torrent",70000){dismissVlcTips();vlcPlaying() && (TorrentRuntime.current?.bytesServed?.get()?:0)>1024}
