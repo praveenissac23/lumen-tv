@@ -52,7 +52,9 @@ N.on('player', (d) => {
     if (P.mode === 'vod' && !P.subsTried) {
       P.subsTried = true;
       const it = P.item;
-      setTimeout(() => { if (P.item === it) autoSubs(subItem(it), (m) => toast(m)); }, 1200);
+      const prefetched = P.subsPromise;
+      setTimeout(() => { if (P.item === it) autoSubs(subItem(it), (m) => toast(m), prefetched,
+        () => P.mode === 'vod' && P.item === it); }, 1200);
     }
   }
   if (d.state === 'ended' && (P.mode === 'vod' || P.mode === 'catchup')) {
@@ -206,14 +208,20 @@ export function playCatchup(ch, prog, list, onExit) {
 }
 
 // item: {title, url, poster, kind, id, sub}
-export function playVod(item, resumeKey, onExit, queue, { forceBuiltIn = false } = {}) {
+export function playVod(item, resumeKey, onExit, queue, { forceBuiltIn = false, playerPkg = null } = {}) {
   const section = item.kind === 'episode' || (resumeKey && resumeKey.startsWith('ep:')) ? 'series' : 'movie';
   const saved = resumeKey && progressOf(resumeKey);
   const title = item.sub && section === 'series' ? `${item.title} – ${item.sub}` : item.title;
   pushRecentVod({ key: resumeKey, kind: section === 'series' ? 'episode' : 'movie', id: item.id, seriesId: item.seriesId, title: item.seriesName || item.title,
     sub: item.sub || '', poster: item.poster, url: item.url, ext: item.ext,
     ...(item.torrentItem ? { torrentItem: item.torrentItem, torrentEpisode: item.torrentEpisode } : {}) });
-  if (!forceBuiltIn && !P.mode && viaDefaultPlayer(section, urlOr(item.url), title, saved ? saved.pos : 0)) {
+  if (playerPkg && !P.mode) {
+    if (P.previewCh) stopPreview();
+    const ok = N.openWith(playerPkg, urlOr(item.url), { title, mode: 'play', position: saved ? Math.round(saved.pos) : 0 });
+    if (ok !== false) { P.ext = { item, resumeKey, startedAt: Date.now() }; return; }
+    toast('That player could not open this video. Playing in Lumen TV.', 'err');
+  }
+  if (!forceBuiltIn && !playerPkg && !P.mode && viaDefaultPlayer(section, urlOr(item.url), title, saved ? saved.pos : 0)) {
     P.ext = { item, resumeKey, startedAt: Date.now() };   // VLC / MX report the position back when they close
     return;
   }
@@ -221,6 +229,8 @@ export function playVod(item, resumeKey, onExit, queue, { forceBuiltIn = false }
   enter('vod');
   P.mode = 'vod'; P.item = item; P.resumeKey = resumeKey; P.ch = null;
   P.queue = queue || []; P.subsTried = false; clearTimeout(P.nextTimer);
+  // Search while the stream buffers; applying a track waits for the player's ready event.
+  P.subsPromise = setting('subAuto') && hasKey() ? searchSubs(subItem(item)).catch(() => []) : null;
   subsBox().innerHTML = '';
   const prog = resumeKey && progressOf(resumeKey);
   P.pos = prog ? prog.pos : 0; P.dur = prog ? prog.dur : 0;

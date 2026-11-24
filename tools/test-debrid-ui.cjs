@@ -12,12 +12,13 @@ const bundle = esbuild.buildSync({ stdin: {
 }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
 const dom = new JSDOM('<!doctype html><div id="stage"><main id="view"></main><div id="overlays"></div><div id="toast"></div></div>',
   { url: 'https://lumen.test', runScripts: 'outside-only', pretendToBeVisual: true });
-const w = dom.window, disk = new Map(), responses = new Map();
+const w = dom.window, disk = new Map(), responses = new Map(), external = [];
 w.Native = {
   cacheRead: (key) => disk.get(key) || null,
   cacheWrite: (key, value) => disk.set(key, value),
   deviceInfo: () => '{}',
-  apps: () => '[]',
+  apps: () => JSON.stringify([{ pkg: 'org.videolan.vlc', name: 'VLC', role: 'player' }]),
+  openWith: (...args) => { external.push(args); return true; },
   call: (id, method, url, headers, body) => {
     let data;
     if (url.endsWith('/magnet/status')) data = { status: 'success', data: { magnets:
@@ -46,8 +47,26 @@ const app = { go() {}, back() {}, reload() {}, openVoice() {} };
   assert.equal(db.library().files.length, 69);
   assert.equal(view.querySelectorAll('.db-card .db-play').length, 69, 'all 69 files visible');
   db.savePlaylist({ id: 'p', name: 'Season', items: [db.library().files[0].id, db.library().files[1].id], autoplay: true });
+  const target = view.querySelectorAll('[data-action="add"]')[40];
+  const targetId = target.dataset.file, scroller = view.querySelector('.db-content');
+  scroller._off = -2400; scroller.style.transform = 'translate3d(0,-2400px,0)';
+  target.focus();
+  const adding = screen.action(target);
+  w.document.querySelector('#overlays .sheet-item').click();
+  await adding;
+  assert.equal(view.querySelector('.db-content')._off, -2400, 'scroll stays at selected file');
+  assert.equal(w.document.activeElement.dataset.file, targetId, 'focus returns to the same file');
+  const sort = view.querySelector('[data-action="sort"]'), sorting = screen.action(sort);
+  w.document.querySelectorAll('#overlays .sheet-item')[2].click();
+  await sorting;
+  assert.equal(screen.sort, 'name', 'file name sort is selectable');
+  const opening = screen.action(view.querySelector('[data-action="play"]'));
+  assert.ok([...w.document.querySelectorAll('#overlays .sheet-item')].some((b) => b.textContent.includes('VLC')));
+  [...w.document.querySelectorAll('#overlays .sheet-item')].find((b) => b.textContent.includes('VLC')).click();
+  await opening;
+  assert.equal(external[0][0], 'org.videolan.vlc', 'Debrid file opens in selected player');
   screen.playlistId = 'p'; screen.paint();
-  assert.equal(view.querySelectorAll('.db-card .db-play').length, 2);
+  assert.equal(view.querySelectorAll('.db-card .db-play').length, 3);
   view.querySelector('[data-action="down"]').click();
   assert.equal(db.savedPlaylist('p').items[0], db.library().files[1].id, 'reorder works via UI');
   screen.destroy();

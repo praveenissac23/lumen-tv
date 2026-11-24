@@ -118,7 +118,8 @@ jobs:
               assert os.path.getsize(path)<limit, 'APK size budget exceeded: '+name
               with zipfile.ZipFile(path) as apk:
                   libraries=[n for n in apk.namelist() if n.endswith('/libjlibtorrent.so')]
-                  assert sorted(libraries)==['lib/'+abi+'/libjlibtorrent.so' for abi in abis], 'APK must contain both ARM architectures'
+                  print('Bundled torrent libraries:', libraries)
+                  assert sorted(libraries)==sorted('lib/'+abi+'/libjlibtorrent.so' for abi in abis), 'APK must contain both ARM architectures'
               print(name,abis,os.path.getsize(path),'bytes')
           PYVERIFY
 

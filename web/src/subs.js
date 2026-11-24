@@ -80,30 +80,31 @@ export async function searchSubs(item, langs = setting('subLangs')) {
   return results;
 }
 
-export async function loadOnline(result) {
+export async function loadOnline(result, stillCurrent = () => true) {
   if (result.source === 'SubDL') {
-    N.loadSubtitle(result.url, result.lang, result.name);
+    if (stillCurrent()) N.loadSubtitle(result.url, result.lang, result.name);
     return { link: result.url };
   }
   const text = await N.call('POST', `${API}/download`, headers(), JSON.stringify({ file_id: result.fileId }));
   const d = JSON.parse(text);
   if (!d.link) throw new Error(d.message || 'Download limit reached for today');
-  N.loadSubtitle(d.link, result.lang, result.name);
+  if (stillCurrent()) N.loadSubtitle(d.link, result.lang, result.name);
   return d;
 }
 
 // Called when a film or episode starts: use an embedded track in a preferred language,
 // otherwise fetch the best online match when auto subtitles are on.
-export async function autoSubs(item, notify) {
+export async function autoSubs(item, notify, prefetched = null, stillCurrent = () => true) {
+  if (!stillCurrent()) return;
   const langs = setting('subLangs') || [];
   const t = N.tracks();
   const embedded = t.text.find((x) => langs.includes((x.lang || '').slice(0, 2)));
   if (embedded) { N.selectTrack('text', embedded.id); notify && notify(`Subtitles: ${langName(embedded.lang.slice(0, 2))}`); return; }
   if (!setting('subAuto') || !hasKey()) return;
   try {
-    const r = await searchSubs(item, langs);
-    if (!r.length) return;
-    await loadOnline(r[0]);
-    notify && notify(`Subtitles: ${langName(r[0].lang)}${r[0].hashMatch ? ', matched to this file' : ''}`);
+    const r = await (prefetched || searchSubs(item, langs));
+    if (!r.length || !stillCurrent()) return;
+    await loadOnline(r[0], stillCurrent);
+    if (stillCurrent()) notify && notify(`Subtitles: ${langName(r[0].lang)}${r[0].hashMatch ? ', matched to this file' : ''}`);
   } catch { /* stay quiet: auto mode */ }
 }

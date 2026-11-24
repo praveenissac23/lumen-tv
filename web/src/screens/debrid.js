@@ -6,6 +6,7 @@ import { esc, bytes } from '../util.js';
 import { icon, toast, sheet, form } from '../ui.js';
 import { focus, focusFirst } from '../nav.js';
 import { playVod } from '../player.js';
+import * as N from '../native.js';
 
 const displayName = (f) => f.name.split('/').pop();
 const fileCard = (f, index = -1) => `<div class="db-card ${index === 0 ? 'db-first' : ''}">
@@ -33,6 +34,10 @@ export async function addFileToPlaylist(fileId) {
 export async function playDebrid(fileId, playlistId = '', app) {
   const p = savedPlaylist(playlistId);
   const index = p ? p.items.indexOf(fileId) : -1;
+  const choices = [{ label: 'Lumen TV player', hint: index >= 0 && p.autoplay !== false ? 'Plays the next playlist file automatically' : 'Plays here with online subtitles', value: 'lumen', icon: 'play' },
+    ...N.installedApps().filter((a) => a.role === 'player').map((a) => ({ label: a.name, hint: 'Plays this file in the external app', value: a.pkg, icon: 'external' }))];
+  const chosen = await sheet({ title: 'Play in which player?', options: choices });
+  if (!chosen) return;
   toast('Getting a fresh AllDebrid playback link…');
   try {
     const item = await playableFile(fileId);
@@ -42,7 +47,8 @@ export async function playDebrid(fileId, playlistId = '', app) {
         key: 'debrid:' + id, prepare: () => playableFile(id),
       })) : [];
     // Play queues need the built-in player to detect the end of each video.
-    playVod(item, 'debrid:' + fileId, () => app?.reload(), queue, { forceBuiltIn: true });
+    playVod(item, 'debrid:' + fileId, () => app?.reload(), chosen === 'lumen' ? queue : [],
+      { forceBuiltIn: chosen === 'lumen', playerPkg: chosen === 'lumen' ? null : chosen });
   } catch (e) { toast('Debrid playback: ' + e.message, 'err'); }
 }
 
@@ -69,7 +75,8 @@ export class DebridScreen {
     try { await refreshLibrary(force); } catch (e) { if (!this.dead) { this.error = e.message; this.paint(false); } }
   }
   paint(keepFocus = true) {
-    const host = this.view.querySelector('.db-content'), old = keepFocus ? document.activeElement : null;
+    const host = this.view.querySelector('.db-content'), old = keepFocus ? (this.restoreFocus || document.activeElement) : null;
+    this.restoreFocus = null;
     const wasInView = !!old && this.view.contains(old);
     const scroll = keepFocus ? host._off || 0 : 0;
     const action = old?.dataset.action, id = old?.dataset.file, idx = old?.dataset.index;
@@ -96,12 +103,15 @@ export class DebridScreen {
     } else {
       const files = allItems().filter((f) => f.name.toLowerCase().includes(this.query.toLowerCase()));
       if (this.sort === 'name') files.sort((a,b) => a.name.localeCompare(b.name));
+      else if (this.sort === 'name-desc') files.sort((a,b) => b.name.localeCompare(a.name));
+      else if (this.sort === 'oldest') files.sort((a,b) => (a.added || 0) - (b.added || 0));
+      else if (this.sort === 'size') files.sort((a,b) => (b.size || 0) - (a.size || 0));
       html += `<div class="db-stats"><div><b>${snap.magnets.length}</b><small>Cloud uploads</small></div>
         <div><b>${snap.files.length}</b><small>Playable files</small></div><div><b>${playlists().length}</b><small>My playlists</small></div></div>
         <div class="db-tools"><button class="f db-chip ${this.mode === 'files' ? 'active' : ''}" data-action="files">All files</button>
           <button class="f db-chip ${this.mode === 'playlists' ? 'active' : ''}" data-action="playlists">My playlists</button>
           <button class="f db-chip" data-action="refresh">${icon('refresh')} Refresh</button>
-          <button class="f db-chip" data-action="sort">Sort: ${this.sort === 'name' ? 'Name' : 'Newest'}</button></div>`;
+          <button class="f db-chip" data-action="sort">Sort: ${{ recent: 'Newest', oldest: 'Oldest', name: 'Name A–Z', 'name-desc': 'Name Z–A', size: 'Largest' }[this.sort] || 'Newest'}</button></div>`;
       if (this.mode === 'playlists') {
         html += '<div class="db-section">Your play queues</div><div class="db-list">' +
           playlists().map((pl) => `<button class="f db-collection" data-action="open" data-id="${esc(pl.id)}"><span class="db-art">${icon('list')}</span><span><b>${esc(pl.name)}</b><small>${pl.items.length} files · Autoplay ${pl.autoplay === false ? 'off' : 'on'}</small></span><span>Open →</span></button>`).join('') +
@@ -118,17 +128,27 @@ export class DebridScreen {
     host.innerHTML = html;
     host._off = scroll; host.style.transform = scroll ? `translate3d(0,${scroll}px,0)` : '';
     const same = [...host.querySelectorAll('[data-action]')].find((b) => b.dataset.action === action && b.dataset.file === id && b.dataset.index === idx);
-    if (wasInView) focus(same || host.querySelector('.f'));
+    if (wasInView) focus(same || host.querySelector('.f'), { noScroll: !!same });
   }
   async action(b) {
     const a = b.dataset.action, p = savedPlaylist(this.playlistId), id = b.dataset.file;
     if (a === 'settings') return this.app.go('settings', { restore: { sec: 'debrid' } });
     if (a === 'refresh') { toast('Refreshing your AllDebrid library…'); return this.refresh(true); }
     if (a === 'files' || a === 'playlists') { this.mode = a; this.playlistId = ''; return this.paint(); }
-    if (a === 'sort') { this.sort = this.sort === 'name' ? 'recent' : 'name'; return this.paint(); }
+    if (a === 'sort') {
+      const choice = await sheet({ title: 'Sort Debrid files', options: [
+        { label: 'Newest first', value: 'recent', on: this.sort === 'recent' },
+        { label: 'Oldest first', value: 'oldest', on: this.sort === 'oldest' },
+        { label: 'File name A–Z', value: 'name', on: this.sort === 'name' },
+        { label: 'File name Z–A', value: 'name-desc', on: this.sort === 'name-desc' },
+        { label: 'Largest first', value: 'size', on: this.sort === 'size' },
+      ] });
+      if (choice) { this.sort = choice; this.restoreFocus = b; this.paint(); }
+      return;
+    }
     if (a === 'addmore' || a === 'back') { this.playlistId = ''; this.mode = 'files'; return this.paint(); }
     if (a === 'open') { this.playlistId = b.dataset.id; return this.paint(); }
-    if (a === 'add') { if (await addFileToPlaylist(id)) this.paint(); return; }
+    if (a === 'add') { if (await addFileToPlaylist(id) && !this.dead) { this.restoreFocus = b; this.paint(); } return; }
     if (a === 'play') return playDebrid(id, p?.id || '', this.app);
     if (a === 'playall') { const first = p.items.find(fileById); if (first) return playDebrid(first, p.id, this.app); return toast('Add a playable file first'); }
     if (a === 'autoplay') { savePlaylist({ ...p, autoplay: p.autoplay === false }); return this.paint(); }

@@ -216,7 +216,7 @@ export class SettingsScreen {
     const key = setting('osKey');
     const subdlKey = setting('subdlKey');
     return `<h1>Subtitles</h1>
-      <p class="st-intro">Embedded subtitles come first. Add a SubDL key, an OpenSubtitles key, or both to search more sources inside Lumen TV.</p>
+      <p class="st-intro">Embedded subtitles come first. Add a SubDL key, an OpenSubtitles key, or both to fetch online subtitles in the background while films and episodes begin playing.</p>
       ${this.row('Fetch subtitles automatically', this.toggle(setting('subAuto')), 'tog', 'subAuto', 'For films and episodes, in your first language below')}
       ${this.row('OpenSubtitles API key', key ? 'Saved' : '<span class="pill">Add</span>', 'oskey', '', key ? key.slice(0, 4) + '…' + key.slice(-3) : 'Free: sign up at opensubtitles.com, then Profile > API consumers')}
       ${this.row('SubDL API key', subdlKey ? 'Saved' : '<span class="pill">Add</span>', 'subdlkey', '', 'Alternative subtitle source · Get a free key from subdl.com')}

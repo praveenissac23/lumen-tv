@@ -33,7 +33,7 @@ const DEFAULTS = {
     theme: 'neon',       // cinema | aurora | royal | neon | classic (wallpaper + accent)
     accent: 'brass',       // brass | teal | coral | violet
     subLangs: ['en'],      // preferred subtitle languages (ISO 639-1)
-    subAuto: false,        // fetch subtitles online automatically for films and episodes
+    subAuto: true,         // fetch subtitles online automatically for films and episodes when a provider key is set
     subSize: 'm',          // s | m | l
     osKey: '',             // OpenSubtitles API key
     subdlKey: '',          // Optional SubDL API key for wider subtitle search
@@ -61,6 +61,12 @@ try { state = JSON.parse(cacheRead('state') || 'null'); } catch { state = null; 
 state = Object.assign(JSON.parse(JSON.stringify(DEFAULTS)), state || {});
 state.settings = Object.assign({}, DEFAULTS.settings, state.settings || {});
 state.favs = Object.assign({ live: [], movie: [], series: [] }, state.favs || {});
+// Enable the requested background subtitle search once for existing installations.
+if (!state.settings.subtitleAuto2026) {
+  state.settings.subAuto = true;
+  state.settings.subtitleAuto2026 = true;
+  cacheWrite('state', JSON.stringify(state));
+}
 
 const saveNow = () => cacheWrite('state', JSON.stringify(state));
 const save = debounce(saveNow, 400);
