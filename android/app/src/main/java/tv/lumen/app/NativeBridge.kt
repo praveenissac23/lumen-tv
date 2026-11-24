@@ -384,8 +384,15 @@ class NativeBridge(private val act: MainActivity) {
             }
         }
         // Download managers register for plain links; players for video types. Try both, then share as text.
-        val directVlc = if(o.optBoolean("torrent") && !download && !magnet && pkg=="org.videolan.vlc") {
-            val video=base("video/*").setClassName(pkg,"org.videolan.vlc.gui.video.VideoPlayerActivity").putExtra("from_external",true)
+        val directVlc = if((o.optBoolean("torrent") || subtitleUri != null) &&
+            !download && !magnet && pkg=="org.videolan.vlc") {
+            val video=base("video/*").setClassName(pkg,"org.videolan.vlc.gui.video.VideoPlayerActivity")
+                .putExtra("from_external",true)
+            if (subtitleUri != null) {
+                video.action = "org.videolan.vlc.gui.video.PLAY_FROM_VIDEOGRID"
+                video.putExtra("item_location", uri)
+                video.putExtra("item_title", title)
+            }
             try { if(pm.getActivityInfo(video.component!!,0).exported) listOf(video) else emptyList() } catch(_:PackageManager.NameNotFoundException){emptyList()}
         }else emptyList()
         val candidates = directVlc + (if (magnet) listOf(base(null), base("application/x-bittorrent")) else if (download) listOf(base(null), base("video/*"), base("application/octet-stream"))

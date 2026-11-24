@@ -10,3 +10,11 @@ adb install -r "$ROOT/android/app/build/outputs/apk/androidTest/release/app-rele
 # release instrumentation directly, with a strict process timeout and explicit results.
 timeout --signal=INT --kill-after=15s 300 adb shell am instrument -w -r -e timeout_msec 90000 tv.lumen.app.test/androidx.test.runner.AndroidJUnitRunner | tee "$ROOT/build/vlc-shots/instrumentation.txt"
 python3 "$ROOT/tools/check-instrumentation.py" "$ROOT/build/vlc-shots/instrumentation.txt"
+adb pull /sdcard/Android/data/tv.lumen.app/files/vlc-tests "$ROOT/build/vlc-shots/"
+if ! command -v tesseract >/dev/null; then sudo apt-get update -qq && sudo apt-get install -y tesseract-ocr; fi
+SUBTITLE_OCR="$(tesseract "$ROOT/build/vlc-shots/vlc-tests/vlc-subtitle-video.png" stdout --psm 11 2>/dev/null)"
+printf '%s\n' "$SUBTITLE_OCR"
+printf '%s\n' "$SUBTITLE_OCR" | grep -Eiq 'LUMEN.*SUBTITLE.*HANDOFF.*TEST' || {
+  echo "VLC played the video but did not visibly render the supplied SRT" >&2
+  exit 1
+}

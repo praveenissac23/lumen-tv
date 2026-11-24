@@ -5,6 +5,7 @@ import android.content.Intent
 import android.graphics.Bitmap
 import android.os.ParcelFileDescriptor
 import android.view.KeyEvent
+import androidx.core.content.FileProvider
 import androidx.test.ext.junit.runners.AndroidJUnit4
 import androidx.test.platform.app.InstrumentationRegistry
 import org.json.JSONObject
@@ -99,6 +100,18 @@ class VlcHandoffTest {
                 Thread.sleep(1400);assertTrue("Direct playback stopped immediately",vlcPlaying());screenshot("vlc-direct-video.png")
                 shell("am force-stop org.videolan.vlc")
                 waitFor("Lumen did not return after VLC"){shell("dumpsys activity activities").lineSequence().any{it.contains("mResumedActivity")&&it.contains("tv.lumen.app")}}
+                val srt=File(context.cacheDir,"subs/fixture.srt").apply {
+                    parentFile?.mkdirs()
+                    writeText("1\n00:00:00,000 --> 00:05:00,000\nLUMEN SUBTITLE HANDOFF TEST\n",Charsets.UTF_8)
+                }
+                val srtUri=FileProvider.getUriForFile(context,"${context.packageName}.files",srt)
+                assertTrue("SRT was not shared by FileProvider",context.contentResolver.openInputStream(srtUri)?.use{it.readBytes().isNotEmpty()}==true)
+                assertEquals("true",js("Native.openWith('org.videolan.vlc',${JSONObject.quote(fixture.video)},JSON.stringify({title:'Subtitle handoff',subtitle:${JSONObject.quote(srtUri.toString())}}))"))
+                waitFor("VLC did not play with the supplied subtitle",30000){dismissVlcTips();vlcPlaying()}
+                settleVlc()
+                Thread.sleep(1600);screenshot("vlc-subtitle-video.png")
+                shell("am force-stop org.videolan.vlc")
+                waitFor("Lumen did not return after subtitle test"){shell("dumpsys activity activities").lineSequence().any{it.contains("mResumedActivity")&&it.contains("tv.lumen.app")}}
                 ins.runOnMainSync{act.webView.requestFocus()}
                 chooseVlc(1)
                 waitFor("Installed VLC did not play the tracker-discovered torrent",70000){dismissVlcTips();vlcPlaying() && (TorrentRuntime.current?.bytesServed?.get()?:0)>1024}
@@ -120,7 +133,7 @@ class VlcHandoffTest {
                 request.setRequestProperty("Range","bytes=0-1023");request.readTimeout=5000
                 try{assertEquals(206,request.responseCode);assertEquals(1024,request.inputStream.use{it.readBytes()}.size)}finally{request.disconnect()}
                 screenshot("vlc-torrent-video.png")
-                File(screenshots,"verified.txt").writeText("Installed VLC direct playback: PASS\nTracker-only peer discovery: PASS\nNative bridge torrent playback while Lumen is backgrounded: PASS\nEmpty and echoed-request activity results keep stream available: PASS\n"+shell("dumpsys media_session"))
+                File(screenshots,"verified.txt").writeText("Installed VLC direct playback: PASS\nSubtitle handoff screenshot captured for OCR: PASS\nTracker-only peer discovery: PASS\nNative bridge torrent playback while Lumen is backgrounded: PASS\nEmpty and echoed-request activity results keep stream available: PASS\n"+shell("dumpsys media_session"))
             } finally {
                 File(screenshots,"final-media-session.txt").writeText(shell("dumpsys media_session"));File(screenshots,"final-activities.txt").writeText(shell("dumpsys activity activities"));screenshot("final-state.png");shell("am force-stop org.videolan.vlc");TorrentRuntime.stop(context)
                 ins.runOnMainSync{act.finish()}
