@@ -15,8 +15,10 @@ import java.util.zip.GZIPInputStream
 /** Plain HTTP helpers: redirects across http/https, gzip, IPTV-friendly user agent. */
 object Net {
 
-    fun open(url: String, timeoutMs: Int, requestHeaders: Map<String, String> = emptyMap()): Pair<HttpURLConnection, InputStream> {
+    fun open(url: String, timeoutMs: Int, requestHeaders: Map<String, String> = emptyMap(),
+             sameHostHeadersOnly: Boolean = false): Pair<HttpURLConnection, InputStream> {
         var target = url
+        val originalHost = URL(url).host
         repeat(6) {
             val c = URL(target).openConnection() as HttpURLConnection
             c.instanceFollowRedirects = false
@@ -29,7 +31,8 @@ object Net {
                 c.setRequestProperty("Cookie", "CONSENT=YES+1; SOCS=CAI")
             } else c.setRequestProperty("User-Agent", PlayerHost.USER_AGENT)
             c.setRequestProperty("Accept-Encoding", "gzip")
-            for ((name, value) in requestHeaders) c.setRequestProperty(name, value)
+            if (!sameHostHeadersOnly || c.url.host.equals(originalHost, ignoreCase = true))
+                for ((name, value) in requestHeaders) c.setRequestProperty(name, value)
             val code = c.responseCode
             if (code in 300..399) {
                 val loc = c.getHeaderField("Location") ?: throw IllegalStateException("Redirect without a location")
@@ -150,8 +153,8 @@ object Net {
     }
 
     /** Downloads a URL to a file (gunzipping if needed). */
-    fun download(url: String, dest: java.io.File) {
-        val (c, s) = open(url, 30000)
+    fun download(url: String, dest: java.io.File, headers: Map<String, String> = emptyMap()) {
+        val (c, s) = open(url, 30000, headers, sameHostHeadersOnly = true)
         try { s.use { input -> dest.outputStream().use { input.copyTo(it) } } } finally { c.disconnect() }
     }
 }

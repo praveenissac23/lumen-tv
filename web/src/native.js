@@ -265,6 +265,11 @@ export function prepareSubtitle(url) {
   const id = ++seq;
   return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); N.prepareSubtitle(id, url); });
 }
+// TV browser keeps SubtitleCat's download inside Lumen so an SRT can be sent
+// straight to the previously selected external player.
+export function openSubtitleCat(searchUrl, videoUrl, playerPkg, title) {
+  return N?.openSubtitleCat ? N.openSubtitleCat(searchUrl, videoUrl, playerPkg, title) : false;
+}
 export function subtitleHash(url) {
   if (!N) return Promise.resolve(null);
   const id = ++seq;

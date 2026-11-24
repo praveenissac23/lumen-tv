@@ -204,6 +204,10 @@ class MainActivity : Activity() {
     override fun onActivityResult(requestCode: Int, resultCode: Int, data: Intent?) {
         super.onActivityResult(requestCode, resultCode, data)
         if (requestCode == REQ_EXT) { bridge.onPlayerResult(data); return }
+        if (requestCode == REQ_SUBTITLE) {
+            bridge.onSubtitleImportResult(if (resultCode == RESULT_OK) data?.data else null)
+            return
+        }
         if (requestCode == REQ_TEXT) {
             bridge.onTextResult(if (resultCode == RESULT_OK) data?.getStringExtra(SearchActivity.EXTRA_TEXT) else null)
             return
@@ -231,5 +235,7 @@ class MainActivity : Activity() {
         const val REQ_VOICE = 42
         const val REQ_TEXT = 43
         const val REQ_EXT = 44
+        const val REQ_SUBTITLE = 45
     }
 }
+

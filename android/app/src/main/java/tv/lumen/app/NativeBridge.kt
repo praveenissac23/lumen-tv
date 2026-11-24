@@ -6,8 +6,15 @@ import android.content.ClipData
 import android.content.ClipboardManager
 import android.content.Context
 import android.content.Intent
+import android.app.Dialog
+import android.graphics.Color
 import android.net.Uri
+import android.view.View
+import android.view.ViewGroup
 import android.view.inputmethod.InputMethodManager
+import android.widget.Button
+import android.widget.LinearLayout
+import android.widget.TextView
 import android.content.pm.PackageManager
 import android.os.Build
 import android.os.Bundle
@@ -15,6 +22,11 @@ import android.speech.RecognitionListener
 import android.speech.RecognizerIntent
 import android.speech.SpeechRecognizer
 import android.webkit.JavascriptInterface
+import android.webkit.WebChromeClient
+import android.webkit.CookieManager
+import android.webkit.WebResourceRequest
+import android.webkit.WebView
+import android.webkit.WebViewClient
 import androidx.core.content.FileProvider
 import org.json.JSONObject
 import org.json.JSONArray
@@ -34,6 +46,8 @@ class NativeBridge(private val act: MainActivity) {
     private val dir: File = File(act.filesDir, "cache").apply { mkdirs() }
     private var externalTorrent = false
     private var recognizer: SpeechRecognizer? = null
+    private var pendingSubtitle: Triple<String, String, String>? = null
+    private var subtitleDialog: Dialog? = null
 
     private fun emit(evt: String, data: JSONObject) = act.emit(evt, data)
     private fun ui(block: () -> Unit) = act.runOnUiThread(block)
@@ -443,6 +457,174 @@ class NativeBridge(private val act: MainActivity) {
     }
 
     // ---------- subtitles and tracks ----------
+    fun onSubtitleImportResult(uri: Uri?) {
+        val request = pendingSubtitle ?: return
+        pendingSubtitle = null
+        if (uri == null) return
+        io.execute {
+            val file = File(File(act.cacheDir, "subs").apply { mkdirs() }, "imported-${System.currentTimeMillis()}.srt")
+            try {
+                val input = act.contentResolver.openInputStream(uri) ?: error("Could not read the selected subtitle")
+                input.use { source ->
+                    file.outputStream().use { dest ->
+                        val buffer = ByteArray(8192)
+                        var size = 0
+                        while (true) {
+                            val count = source.read(buffer)
+                            if (count < 0) break
+                            size += count
+                            require(size <= 5_000_000) { "The subtitle is too large" }
+                            dest.write(buffer, 0, count)
+                        }
+                    }
+                }
+                val first = file.inputStream().bufferedReader().use { reader ->
+                    (1..3).joinToString("\n") { reader.readLine().orEmpty() }
+                }
+                require(Regex("\\d{2}:\\d{2}:\\d{2}[,.]\\d{3}").containsMatchIn(first)) {
+                    "Choose a valid .srt subtitle file"
+                }
+                val content = FileProvider.getUriForFile(act, "${act.packageName}.files", file)
+                ui {
+                    subtitleDialog?.dismiss()
+                    subtitleDialog = null
+                    openWith(request.second, request.first, JSONObject().put("title", request.third)
+                        .put("subtitle", content.toString()).toString())
+                }
+            } catch (e: Exception) {
+                file.delete()
+                emit("toast", JSONObject().put("text", e.message ?: "Could not import the subtitle"))
+            }
+        }
+    }
+
+    /**
+     * SubtitleCat's Translate button runs in a browser. Keep that browser in our
+     * process so a user-initiated SRT download can be handed to VLC/MX immediately.
+     * An external download manager cannot report its private download to us.
+     */
+    @JavascriptInterface
+    fun openSubtitleCat(searchUrl: String, videoUrl: String, playerPkg: String, title: String): Boolean {
+        val site = Uri.parse(searchUrl)
+        if (site.scheme != "https" || site.host !in listOf("subtitlecat.com", "www.subtitlecat.com") ||
+            videoUrl.let { !it.startsWith("https://") && !it.startsWith("http://") } || playerPkg !in listOf(
+                "org.videolan.vlc", "com.mxtech.videoplayer.ad", "com.mxtech.videoplayer.pro", "com.brouken.player"
+            )) return false
+        ui {
+            val dialog = Dialog(act, android.R.style.Theme_Black_NoTitleBar_Fullscreen)
+            val root = LinearLayout(act).apply { orientation = LinearLayout.VERTICAL; setBackgroundColor(Color.rgb(12, 16, 28)) }
+            val bar = LinearLayout(act).apply { orientation = LinearLayout.HORIZONTAL }
+            val status = TextView(act).apply {
+                text = "SubtitleCat · choose the matching subtitle, then Malayalam → Translate → Download"
+                setTextColor(Color.WHITE); textSize = 16f; setPadding(20, 12, 16, 12)
+            }
+            val browser = WebView(act).apply {
+                settings.javaScriptEnabled = true
+                settings.domStorageEnabled = true
+                settings.allowFileAccess = false
+                settings.allowContentAccess = false
+                settings.setSupportMultipleWindows(false)
+                setBackgroundColor(Color.WHITE)
+            }
+            var downloading = false
+            fun downloadSrt(url: String) {
+                val u = Uri.parse(url)
+                if (u.scheme != "https" || u.host !in listOf("subtitlecat.com", "www.subtitlecat.com") ||
+                    !u.path.orEmpty().endsWith(".srt", ignoreCase = true)) {
+                    status.text = "Choose a Malayalam .srt download on SubtitleCat."
+                    return
+                }
+                if (downloading) return
+                downloading = true
+                status.text = "Downloading Malayalam subtitles…"
+                val cookies = CookieManager.getInstance().getCookie(url)
+                val headers = mapOf("Referer" to browser.url.orEmpty(), "User-Agent" to browser.settings.userAgentString) +
+                    (if (cookies.isNullOrBlank()) emptyMap() else mapOf("Cookie" to cookies))
+                io.execute {
+                    val file = File(File(act.cacheDir, "subs").apply { mkdirs() }, "subtitlecat-${System.currentTimeMillis()}.srt")
+                    try {
+                        Net.download(url, file, headers)
+                        require(file.length() in 20..5_000_000) { "The subtitle file is empty or too large" }
+                        val beginning = file.inputStream().bufferedReader().use { it.readLine().orEmpty() + "\n" + it.readLine().orEmpty() + "\n" + it.readLine().orEmpty() }
+                        require(Regex("\\d{2}:\\d{2}:\\d{2}[,.]\\d{3}").containsMatchIn(beginning)) {
+                            "The download was not an SRT subtitle"
+                        }
+                        val content = FileProvider.getUriForFile(act, "${act.packageName}.files", file)
+                        ui {
+                            dialog.dismiss()
+                            if (!openWith(playerPkg, videoUrl, JSONObject().put("title", title)
+                                    .put("subtitle", content.toString()).toString())) {
+                                emit("toast", JSONObject().put("text", "The selected player could not open the subtitle"))
+                            }
+                        }
+                    } catch (e: Exception) {
+                        file.delete()
+                        ui { downloading = false; status.text = e.message ?: "Subtitle download failed. Try again." }
+                    }
+                }
+            }
+            browser.webViewClient = object : WebViewClient() {
+                override fun shouldOverrideUrlLoading(view: WebView, request: WebResourceRequest): Boolean {
+                    val url = request.url.toString()
+                    if (request.url.path.orEmpty().endsWith(".srt", ignoreCase = true)) { downloadSrt(url); return true }
+                    return request.url.scheme !in listOf("https", "http")
+                }
+                @Suppress("DEPRECATION")
+                override fun shouldOverrideUrlLoading(view: WebView, url: String): Boolean {
+                    if (Uri.parse(url).path.orEmpty().endsWith(".srt", ignoreCase = true)) { downloadSrt(url); return true }
+                    return Uri.parse(url).scheme !in listOf("https", "http")
+                }
+            }
+            browser.webChromeClient = WebChromeClient()
+            browser.setDownloadListener { url, _, _, _, _ -> downloadSrt(url) }
+            fun button(label: String, action: () -> Unit) = Button(act).apply {
+                text = label; textSize = 15f; setTextColor(Color.WHITE)
+                backgroundTintList = android.content.res.ColorStateList.valueOf(Color.rgb(31, 48, 73))
+                setOnClickListener { action() }; isFocusable = true
+            }
+            bar.addView(button("Back") { if (browser.canGoBack()) browser.goBack() else dialog.dismiss() })
+            bar.addView(button("Open in Downloader") {
+                val pm = act.packageManager
+                val pkg = "com.esaba.downloader"
+                val installed = try { pm.getPackageInfo(pkg, 0); true } catch (_: Exception) { false }
+                if (!installed) status.text = "Downloader is not installed. Use this browser for automatic playback."
+                else try {
+                    act.startActivity(Intent(Intent.ACTION_VIEW, site).addCategory(Intent.CATEGORY_BROWSABLE).setPackage(pkg))
+                    status.text = "Downloader cannot return its saved file automatically. Use this browser for automatic playback."
+                } catch (_: Exception) { status.text = "Downloader could not open this page. Use this browser instead." }
+            })
+            bar.addView(button("Use downloaded SRT") {
+                try {
+                    pendingSubtitle = Triple(videoUrl, playerPkg, title)
+                    act.startActivityForResult(Intent(Intent.ACTION_OPEN_DOCUMENT).apply {
+                        addCategory(Intent.CATEGORY_OPENABLE)
+                        type = "*/*"
+                        putExtra(Intent.EXTRA_MIME_TYPES, arrayOf("application/x-subrip", "text/plain", "application/octet-stream"))
+                    }, MainActivity.REQ_SUBTITLE)
+                    status.text = "Select the Malayalam .srt saved by Downloader."
+                } catch (_: Exception) {
+                    pendingSubtitle = null
+                    status.text = "This Fire TV cannot open a subtitle file picker. Use this browser for automatic playback."
+                }
+            })
+            bar.addView(button("Close") { dialog.dismiss() })
+            root.addView(bar)
+            root.addView(status)
+            root.addView(browser, LinearLayout.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, 0, 1f))
+            dialog.setContentView(root)
+            subtitleDialog = dialog
+            dialog.setOnDismissListener {
+                if (subtitleDialog === dialog) subtitleDialog = null
+                browser.stopLoading(); root.removeView(browser); browser.destroy()
+            }
+            dialog.show()
+            dialog.window?.setLayout(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+            browser.loadUrl(searchUrl)
+            browser.requestFocus()
+        }
+        return true
+    }
+
     @JavascriptInterface
     fun prepareSubtitle(id: Int, url: String) {
         io.execute {

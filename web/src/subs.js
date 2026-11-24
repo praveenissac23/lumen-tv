@@ -109,32 +109,11 @@ export async function subtitleCatMalayalam(item) {
   return '';
 }
 
-// Start an official SubDL translation only on an explicit Malayalam request.
-// The existing SubDL key needs a paid translation entitlement and quota.
-export async function translateMalayalam(item, progress = () => {}) {
-  const key = (setting('subdlKey') || '').trim();
-  if (!key) throw new Error('A SubDL key with a paid translation plan is needed in Settings > Subtitles.');
-  const source = (await searchSubs(item, ['en'])).find((r) => r.source === 'SubDL' && r.nId && r.fileNId);
-  if (!source) throw new Error('No matching English subtitle was found to translate.');
-  const root = 'https://api.subdl.com/api/v2/ai/translations';
-  const headers = { Authorization: 'Bearer ' + key, 'Content-Type': 'application/json', Accept: 'application/json' };
-  const getJson = async (method, url, body) => {
-    const response = JSON.parse(await N.call(method, url, headers, body ? JSON.stringify(body) : ''));
-    if (response.error && !response.job) throw new Error(response.message || response.error);
-    return response;
-  };
-  const data = await getJson('POST', root,
-    { n_id: source.nId, file_n_id: source.fileNId, target_language: 'ML', format: 'srt' });
-  const id = data.request_id || data.job?.id;
-  if (!id || !/^[\w-]+$/.test(id)) throw new Error('The translation service did not start a job.');
-  for (let attempt = 0; attempt < 45; attempt++) {
-    const job = attempt === 0 ? data.job : (await getJson('GET', root + '/' + id)).job;
-    if (job?.download_ready) return root + '/' + id + '/download?api_key=' + encodeURIComponent(key);
-    if (['failed', 'aborted'].includes(job?.status)) throw new Error(job.error || 'Translation failed.');
-    progress(job?.progress || 0);
-    await new Promise((resolve) => setTimeout(resolve, 2000));
-  }
-  throw new Error('Translation is still processing. Try Malayalam again shortly.');
+export function subtitleCatQuery(title) {
+  const clean = String(title || '').replace(/^www\.[^ ]+\s*-\s*/i, '');
+  const tv = /^(.+?)\s*\(\d{4}\)\s*S(\d{1,2})\s*EP\s*\((\d{1,3})(?:\s*-\s*\d{1,3})?\)/i.exec(clean);
+  if (tv) return `${tv[1].trim()} S${tv[2].padStart(2, '0')}E${tv[3].padStart(2, '0')}`;
+  return clean.replace(/\b(?:TRUE|WEB-DL|1080p|720p|AVC|AAC|x264|x265)\b.*$/i, '').trim() || clean;
 }
 
 export async function loadOnline(result, stillCurrent = () => true) {

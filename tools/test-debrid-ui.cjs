@@ -13,7 +13,7 @@ const bundle = esbuild.buildSync({ stdin: {
 }, bundle: true, write: false, format: 'iife', target: 'chrome69' }).outputFiles[0].text;
 const dom = new JSDOM('<!doctype html><div id="stage"><main id="view"></main><div id="overlays"></div><div id="toast"></div></div>',
   { url: 'https://lumen.test', runScripts: 'outside-only', pretendToBeVisual: true });
-const w = dom.window, disk = new Map(), responses = new Map(), external = [], subtitleRequests = [];
+const w = dom.window, disk = new Map(), responses = new Map(), external = [], subtitleRequests = [], subtitleBrowsers = [];
 w.Native = {
   cacheRead: (key) => disk.get(key) || null,
   cacheWrite: (key, value) => disk.set(key, value),
@@ -21,6 +21,7 @@ w.Native = {
   apps: () => JSON.stringify([{ pkg: 'org.videolan.vlc', name: 'VLC', role: 'player' },
     { pkg: 'idm.internet.download.manager', name: '1DM', role: 'download' }]),
   openWith: (...args) => { external.push(args); return true; },
+  openSubtitleCat: (...args) => { subtitleBrowsers.push(args); return true; },
   subtitleHash: (id) => Promise.resolve().then(() => w.__nat('head', { id, ok: true, hash: 'test-hash' })),
   prepareSubtitle: (id, url) => {
     subtitleRequests.push(url); responses.set(id, 'content://tv.lumen.app.files/subtitles/malayalam.srt');
@@ -85,6 +86,14 @@ const app = { go() {}, back() {}, reload() {}, openVoice() {} };
   [...w.document.querySelectorAll('#overlays .sheet-item')].find((b) => b.textContent.includes('VLC') && !b.textContent.includes('Malayalam')).click();
   await english;
   assert.ok(subtitleRequests[1].includes('/subtitle/test/en'), 'ordinary VLC play searches English without a language prompt');
+  setting('subdlKey', '');
+  const manual = screen.action(view.querySelector('[data-action="play"]'));
+  [...w.document.querySelectorAll('#overlays .sheet-item')].find((b) => b.textContent.includes('VLC · Malayalam')).click();
+  await manual;
+  assert.equal(subtitleBrowsers.length, 1, 'missing Malayalam opens the in-app subtitle browser');
+  assert.match(subtitleBrowsers[0][0], /subtitlecat\.com\/index\.php\?search=/);
+  assert.equal(subtitleBrowsers[0][2], 'org.videolan.vlc', 'chosen player is retained until the SRT is downloaded');
+  assert.equal(external.length, 2, 'video does not open without the requested subtitle');
   const downloading = screen.action(view.querySelector('[data-action="download"]'));
   [...w.document.querySelectorAll('#overlays .sheet-item')].find((b) => b.textContent.includes('1DM')).click();
   await downloading;
