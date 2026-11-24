@@ -16,14 +16,16 @@ import { VodScreen, DetailScreen } from './screens/vod.js';
 import { SearchScreen, tryLines } from './screens/searchview.js';
 import { SettingsScreen } from './screens/settings.js';
 import { TorrentDetailScreen } from './screens/torrentdetail.js';
+import { DebridScreen } from './screens/debrid.js';
 
 const SCREENS = {
   home: HomeScreen, live: LiveScreen, guide: GuideScreen, movies: VodScreen, series: VodScreen,
-  favourites: LiveScreen, detail: DetailScreen, search: SearchScreen, settings: SettingsScreen, torrent: TorrentDetailScreen,
+  favourites: LiveScreen, detail: DetailScreen, search: SearchScreen, settings: SettingsScreen, torrent: TorrentDetailScreen, debrid: DebridScreen,
 };
 const RAIL = [
   ['search', 'search', 'Search'], ['home', 'home', 'Home'], ['live', 'live', 'Live TV'], ['guide', 'guide', 'TV guide'],
-  ['movies', 'film', 'Films'], ['series', 'series', 'Series'], ['favourites', 'heart', 'Favourites'], ['settings', 'gear', 'Settings'],
+  ['movies', 'film', 'Films'], ['series', 'series', 'Series'], ['debrid', 'download', 'Debrid'],
+  ['favourites', 'heart', 'Favourites'], ['settings', 'gear', 'Settings'],
 ];
 
 const stack = [];

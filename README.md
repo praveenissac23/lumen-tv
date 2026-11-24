@@ -17,6 +17,23 @@ A light, fast IPTV player for Fire TV, Google TV and Android TV boxes. It plays 
 | Look | Wallpapers (midnight bubbles, deep teal, plum, desert dusk, Kerala green, plain, your own picture), very slow drifting bubbles (paused during playback), five highlight colours, new app icon and TV banner |
 | Also | Master search across channels, guide, films and series; TV guide with catch-up; parental PIN; multiple playlists; account expiry; trailers |
 
+## Personal Debrid library
+
+Connect AllDebrid under Settings > Debrid and torrents. The Debrid item in the left
+menu automatically imports completed magnets, their playable video files, and
+saved video links. Processing uploads are listed separately. Refresh rechecks the
+account, and the Debrid tab in Search finds your own files and playlists.
+
+Add files to named playlists, move them up or down, and select Play all. Lumen
+fetches a fresh AllDebrid link for each file as playback reaches it. Automatic
+next-file playback uses Lumen's built-in player, which can detect the video end;
+external VLC playback remains available for individual sources elsewhere in
+the app. Playlists are stored on this device and do not delete AllDebrid files.
+
+Subtitles in the built-in player can search OpenSubtitles and/or SubDL. Configure
+the API keys under Settings > Subtitles. Embedded tracks are preferred, and
+manual title search helps with videos whose filenames contain release tags.
+
 ## Why it's fast
 
 - The whole catalogue and guide are cached on the device, so the app opens straight onto the home screen and refreshes in the background. With 4,000 channels, 6,000 films and a full guide, the app's own start-up work took under 60 ms in a desktop browser; expect a few hundred milliseconds on a Fire TV Stick.

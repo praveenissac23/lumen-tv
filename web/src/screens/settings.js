@@ -214,10 +214,12 @@ export class SettingsScreen {
   subs() {
     const langs = setting('subLangs') || [];
     const key = setting('osKey');
+    const subdlKey = setting('subdlKey');
     return `<h1>Subtitles</h1>
-      <p class="st-intro">Subtitles inside a video are used first. Otherwise they can be fetched from OpenSubtitles.com, matched to the exact file when the server allows it.</p>
+      <p class="st-intro">Embedded subtitles come first. Add a SubDL key, an OpenSubtitles key, or both to search more sources inside Lumen TV.</p>
       ${this.row('Fetch subtitles automatically', this.toggle(setting('subAuto')), 'tog', 'subAuto', 'For films and episodes, in your first language below')}
       ${this.row('OpenSubtitles API key', key ? 'Saved' : '<span class="pill">Add</span>', 'oskey', '', key ? key.slice(0, 4) + '…' + key.slice(-3) : 'Free: sign up at opensubtitles.com, then Profile > API consumers')}
+      ${this.row('SubDL API key', subdlKey ? 'Saved' : '<span class="pill">Add</span>', 'subdlkey', '', 'Alternative subtitle source · Get a free key from subdl.com')}
       ${this.row('Subtitle size', { s: 'Small', m: 'Medium', l: 'Large' }[setting('subSize') || 'm'], 'pick', 'subSize')}
       <h2>Languages, in order of preference</h2>
       ${SUB_LANGS.map(([iso, nm]) => this.row(nm, `${langs.includes(iso) ? `<span class="order">${langs.indexOf(iso) + 1}</span>` : ''}${this.toggle(langs.includes(iso))}`, 'sublang', iso)).join('')}`;
@@ -362,6 +364,12 @@ export class SettingsScreen {
     if (a === 'oskey') {
       const v = await form({ title: 'OpenSubtitles API key', note: 'Create a free account at opensubtitles.com, open Profile > API consumers, create one and copy its key.', fields: [{ name: 'key', label: 'API key', value: setting('osKey') }] });
       if (v) setting('osKey', v.key);
+      this.repaint(btn); return;
+    }
+    if (a === 'subdlkey') {
+      const v = await form({ title: 'SubDL API key', note: 'Get your free API key from your SubDL account.',
+        fields: [{ name: 'key', label: 'API key', type: 'password', value: setting('subdlKey') || '' }], submit: 'Save' });
+      if (v) setting('subdlKey', v.key.trim());
       this.repaint(btn); return;
     }
     if (a === 'sublang') {

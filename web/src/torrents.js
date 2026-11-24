@@ -20,6 +20,7 @@ export function saveAccount(id, key) {
   const a = accounts();
   if (key) a[id] = { key }; else delete a[id];
   N.cacheWrite(KEY, JSON.stringify(a));
+  if (id === 'ad') { N.cacheWrite('debrid-library', ''); if (typeof document !== 'undefined') document.dispatchEvent(new Event('debrid-account-changed')); }
   jobs.clear(); readyCache.clear();
 }
 export function preferredProvider() {
@@ -148,7 +149,7 @@ export async function findSources(type, id, { refresh = false } = {}) {
     return sources;
   });
 }
-async function api(id, path, method = 'GET', fields, overrideKey) {
+export async function api(id, path, method = 'GET', fields, overrideKey) {
   const key = overrideKey || accounts()[id]?.key;
   if (!key) throw new Error(`Connect ${PROVIDERS[id]} in Settings > Debrid and torrents.`);
   const headers = { Authorization: 'Bearer ' + key };

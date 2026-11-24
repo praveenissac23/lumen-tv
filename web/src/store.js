@@ -4,6 +4,7 @@ import { debounce } from './util.js';
 
 const DEFAULTS = {
   playlists: [],
+  debridPlaylists: [],
   active: 'demo',
   favs: { live: [], movie: [], series: [] },
   recentLive: [],          // channel ids, newest first
@@ -35,6 +36,7 @@ const DEFAULTS = {
     subAuto: false,        // fetch subtitles online automatically for films and episodes
     subSize: 'm',          // s | m | l
     osKey: '',             // OpenSubtitles API key
+    subdlKey: '',          // Optional SubDL API key for wider subtitle search
     downloader: '',        // remembered download app package ('' = ask)
     extPlayer: '',         // remembered external player package
     playerLive: 'lumen',   // default player per section: 'lumen' (built in) or an app package

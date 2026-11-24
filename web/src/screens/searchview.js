@@ -5,6 +5,9 @@ import { esc, hhmm, now, dayLabel, debounce } from '../util.js';
 import { focus } from '../nav.js';
 import { icon, logo, poster, progressBar, stars, nowSlot, patchNowSlots } from '../ui.js';
 import { findTitles } from '../torrents.js';
+import { accounts } from '../torrents.js';
+import { library, allItems, playlists, refreshLibrary } from '../debrid-library.js';
+import { playDebrid, addFileToPlaylist } from './debrid.js';
 import { search, suggestFrom, searchOnTv } from '../search.js';
 import { playLive, playCatchup } from '../player.js';
 import { itemActions } from '../actions.js';
@@ -29,9 +32,10 @@ export class SearchScreen {
         <div class="sr-sugg" id="sr-sugg" data-group="sugg"></div>
       </div></div></aside>
       <section class="sr-results" data-zone="srres">
-        <div class="sr-tabs" data-group="srtabs"><button class="f sr-tab" data-tab="lumen">Lumen TV</button><button class="f sr-tab" data-tab="torrents">Torrents <small id="sr-torrent-count"></small></button></div>
+        <div class="sr-tabs" data-group="srtabs"><button class="f sr-tab" data-tab="lumen">Lumen TV</button><button class="f sr-tab" data-tab="debrid">Debrid <small id="sr-debrid-count"></small></button><button class="f sr-tab" data-tab="torrents">Torrents <small id="sr-torrent-count"></small></button></div>
         <div class="sr-scroll sr-lumen-pane" data-scroll="y" data-pad="0"><div class="sr-track" id="sr-track"></div></div>
         <div class="sr-scroll sr-torrent-pane" data-scroll="y" data-pad="0" hidden><div class="sr-track" id="sr-torrents" aria-live="polite"></div></div>
+        <div class="sr-scroll sr-debrid-pane" data-scroll="y" data-pad="0" hidden><div class="sr-track" id="sr-debrid" aria-live="polite"></div></div>
       </section>
     </div>`;
     this.input = view.querySelector('#sr-input');
@@ -53,6 +57,13 @@ export class SearchScreen {
     // the TV keyboard types into the field; mirror it into the search
     this.input.addEventListener('blur', () => { this.input.readOnly = true; this.input.tabIndex = -1; if (this.view.contains(document.activeElement) === false) focus(this.view.querySelector('#sr-dictate')); });
     view.addEventListener('click', (e) => {
+      const db = e.target.closest('[data-db-play],[data-db-open],[data-db-add]');
+      if (db) {
+        if (db.dataset.dbPlay) playDebrid(db.dataset.dbPlay, '', this.app);
+        else if (db.dataset.dbOpen) app.go('debrid', { id: db.dataset.dbOpen });
+        else addFileToPlaylist(db.dataset.dbAdd).then(() => this.paintDebrid());
+        return;
+      }
       const torrent = e.target.closest('[data-torrent]');
       if (torrent) { const item = this.titles?.[+torrent.dataset.torrent]; if (item) { this.lastTorrent = item.id; pushSearch(this.q); app.go('torrent', { item }); } return; }
       if (e.target.closest('[data-torrent-retry]')) { this.lastTorrentQ = null; this.searchTorrents(); return; }
@@ -71,12 +82,16 @@ export class SearchScreen {
       const v = Math.min(y, max);
       tr._off = -v; tr.style.transform = `translate3d(0,${-v}px,0)`;
     });
+    this.dbListener = () => this.paintDebrid();
+    document.addEventListener('debrid-library-changed', this.dbListener);
     this.applyTab(); this.paint();
+    if (accounts().ad?.key) refreshLibrary().catch(() => {});
   }
 
   paint() {
     if (this.dead) return;
     this.searchTorrents();
+    this.paintDebrid();
     const suggestionIndex = [...this.view.querySelectorAll('#sr-sugg .f')].indexOf(document.activeElement);
     const q = this.q.trim();
     const track = this.view.querySelector('#sr-track');
@@ -132,6 +147,30 @@ export class SearchScreen {
     this.view.querySelectorAll('[data-tab]').forEach((b) => { b.classList.toggle('on', b.dataset.tab === this.tab); b.setAttribute('aria-pressed', String(b.dataset.tab === this.tab)); });
     this.view.querySelector('.sr-lumen-pane').hidden = this.tab !== 'lumen';
     this.view.querySelector('.sr-torrent-pane').hidden = this.tab !== 'torrents';
+    this.view.querySelector('.sr-debrid-pane').hidden = this.tab !== 'debrid';
+  }
+  paintDebrid() {
+    const host = this.view.querySelector('#sr-debrid'), count = this.view.querySelector('#sr-debrid-count');
+    if (!host || !count) return;
+    const q = this.q.trim().toLowerCase();
+    const matches = q.length >= 2 ? allItems().filter((f) => (f.name + ' ' + f.magnetName).toLowerCase().includes(q)) : [];
+    const groups = q.length >= 2 ? playlists().filter((p) => p.name.toLowerCase().includes(q)) : [];
+    count.textContent = matches.length || groups.length ? `(${matches.length + groups.length})` : '';
+    if (!accounts().ad?.key) {
+      host.innerHTML = '<div class="db-empty"><h2>Connect AllDebrid</h2><p>Open Settings → Debrid and torrents to connect your account.</p></div>';
+      return;
+    }
+    if (q.length < 2) {
+      host.innerHTML = '<div class="db-empty"><h2>Search your AllDebrid library</h2><p>Type at least two characters to find uploaded videos and your playlists.</p></div>';
+      return;
+    }
+    const row = (f) => `<div class="db-card"><span class="db-art">${icon('film')}</span><span class="db-copy"><b>${esc(f.name.split('/').pop())}</b><small>AllDebrid · Ready</small></span>
+      <span class="db-actions"><button class="f db-button db-play" data-db-play="${esc(f.id)}">${icon('play')} Play</button>
+      <button class="f db-button" data-db-add="${esc(f.id)}">${icon('plus')} Add to playlist</button></span></div>`;
+    host.innerHTML = `<div class="db-section">Your AllDebrid files <small>${matches.length}</small></div>
+      ${matches.map(row).join('') || '<p class="db-note">No matching video files.</p>'}
+      ${groups.length ? `<div class="db-section">Matching playlists</div>${groups.map((p) => `<button class="f db-collection" data-db-open="${esc(p.id)}"><span class="db-art">${icon('list')}</span><span><b>${esc(p.name)}</b><small>${p.items.length} files · Autoplay ${p.autoplay === false ? 'off' : 'on'}</small></span><span>Open →</span></button>`).join('')}` : ''}
+      ${!library().updatedAt ? '<p class="db-note">Your library is loading…</p>' : ''}`;
   }
   async switchTab(tab) {
     if (this.dead) return;
@@ -181,7 +220,7 @@ export class SearchScreen {
   }
 
   resultFocus() {
-    return this.view.querySelector(this.tab === 'torrents' ? '.sr-torrent-pane .f' : '.sr-lumen-pane .f') || this.view.querySelector(`[data-tab="${this.tab}"]`);
+    return this.view.querySelector(this.tab === 'torrents' ? '.sr-torrent-pane .f' : this.tab === 'debrid' ? '.sr-debrid-pane .f' : '.sr-lumen-pane .f') || this.view.querySelector(`[data-tab="${this.tab}"]`);
   }
 
   bestCard(b, t) {
@@ -318,12 +357,12 @@ export class SearchScreen {
       return;
     }
     if (this.params.ime) { focus(this.view.querySelector('#sr-dictate')); return; }
-    if (this.params.restore?.tab === 'torrents') { focus(this.view.querySelector('[data-tab="torrents"]')); return; }
+    if (['torrents','debrid'].includes(this.params.restore?.tab)) { focus(this.view.querySelector(`[data-tab="${this.params.restore.tab}"]`)); return; }
     if (this.params.voice) { focus(this.resultFocus()); return; }
     focus(this.view.querySelector('.key'));
   }
   save() { return { q: this.q, tab: this.tab, lastTorrent: this.lastTorrent }; }
-  destroy() { this.dead = true; ++this.tvToken; ++this.torrentToken; clearTimeout(this.torrentTimer); this.run.cancel(); }
+  destroy() { this.dead = true; ++this.tvToken; ++this.torrentToken; clearTimeout(this.torrentTimer); this.run.cancel(); document.removeEventListener('debrid-library-changed', this.dbListener); }
 }
 
 export function tryLines() {

@@ -4,7 +4,7 @@ import { C, nowNext, liveUrl, catchupUrl, progs } from './data.js';
 import { S, set, setting, pushRecentLive, pushRecentVod, saveProgress, progressOf, isFav, toggleFav } from './store.js';
 import { $, esc, hhmm, duration, minutesLeft, now, el } from './util.js';
 import { pushLayer, popLayer, focus } from './nav.js';
-import { icon, logo, progressBar, toast, sheet, VList, nowSlot, patchNowSlots } from './ui.js';
+import { icon, logo, progressBar, toast, sheet, form, VList, nowSlot, patchNowSlots } from './ui.js';
 import { autoSubs, searchSubs, loadOnline, hasKey, langName, SUB_LANGS } from './subs.js';
 import { itemActions, download } from './actions.js';
 import { bgHole } from './look.js';
@@ -206,14 +206,14 @@ export function playCatchup(ch, prog, list, onExit) {
 }
 
 // item: {title, url, poster, kind, id, sub}
-export function playVod(item, resumeKey, onExit, queue) {
+export function playVod(item, resumeKey, onExit, queue, { forceBuiltIn = false } = {}) {
   const section = item.kind === 'episode' || (resumeKey && resumeKey.startsWith('ep:')) ? 'series' : 'movie';
   const saved = resumeKey && progressOf(resumeKey);
   const title = item.sub && section === 'series' ? `${item.title} – ${item.sub}` : item.title;
   pushRecentVod({ key: resumeKey, kind: section === 'series' ? 'episode' : 'movie', id: item.id, seriesId: item.seriesId, title: item.seriesName || item.title,
     sub: item.sub || '', poster: item.poster, url: item.url, ext: item.ext,
     ...(item.torrentItem ? { torrentItem: item.torrentItem, torrentEpisode: item.torrentEpisode } : {}) });
-  if (!P.mode && viaDefaultPlayer(section, urlOr(item.url), title, saved ? saved.pos : 0)) {
+  if (!forceBuiltIn && !P.mode && viaDefaultPlayer(section, urlOr(item.url), title, saved ? saved.pos : 0)) {
     P.ext = { item, resumeKey, startedAt: Date.now() };   // VLC / MX report the position back when they close
     return;
   }
@@ -437,7 +437,8 @@ async function subtitleMenu() {
   const t = N.tracks();
   const opts = [{ label: 'Off', value: 'off', on: !t.text.some((x) => x.selected) }];
   for (const x of t.text) opts.push({ label: x.label, value: 'id:' + x.id, on: x.selected, icon: 'subtitles', hint: x.external ? 'Downloaded' : 'In the video' });
-  if (P.mode === 'vod') opts.push({ label: 'Search online', value: 'online', icon: 'search', hint: hasKey() ? (setting('subLangs') || []).map(langName).join(', ') : 'Needs a free OpenSubtitles key' });
+  if (P.mode === 'vod') opts.push({ label: 'Search online · SubDL + OpenSubtitles', value: 'online', icon: 'search', hint: hasKey() ? (setting('subLangs') || []).map(langName).join(', ') : 'Add a subtitle key in Settings' });
+  if (P.mode === 'vod') opts.push({ label: 'Search subtitles by title', value: 'search-title', icon: 'search', hint: 'Useful when a filename has release tags or a multi-episode pack' });
   opts.push({ label: 'Subtitle size', value: 'size', icon: 'subtitles', hint: { s: 'Small', m: 'Medium', l: 'Large' }[setting('subSize') || 'm'] });
   const v = await sheet({ title: 'Subtitles', options: opts });
   if (!v) return;
@@ -448,18 +449,26 @@ async function subtitleMenu() {
     if (z) { setting('subSize', z); subsBox(); }
     return;
   }
-  if (v === 'online') {
-    if (!hasKey()) { toast('Add your OpenSubtitles key in Settings > Subtitles. You can paste it from your phone.', 'err'); return; }
+  if (v === 'online' || v === 'search-title') {
+    if (!hasKey()) { toast('Add a SubDL or OpenSubtitles key in Settings > Subtitles.', 'err'); return; }
+    let query = subItem(P.item);
+    if (v === 'search-title') {
+      const result = await form({ title: 'Search subtitles by title',
+        fields: [{ name: 'title', label: 'Film or series name', value: query.title || '', required: true }],
+        submit: 'Search subtitles' });
+      if (!result?.title?.trim()) return;
+      query = { ...query, title: result.title.trim() };
+    }
     toast('Searching subtitles');
     try {
-      const r = await searchSubs(subItem(P.item));
+      const r = await searchSubs(query);
       if (!r.length) { toast('No subtitles found for this title'); return; }
       const pick = await sheet({ title: 'Online subtitles', options: r.slice(0, 30).map((x, i) => ({
-        label: `${langName(x.lang)}${x.hashMatch ? ' \u00b7 matches this file' : ''}`, hint: x.name.slice(0, 60), value: String(i), icon: x.hashMatch ? 'check' : 'subtitles' })) });
+        label: `${langName(x.lang)} · ${x.source}${x.hashMatch ? ' · exact file' : ''}`, hint: x.name.slice(0, 60), value: String(i), icon: x.hashMatch ? 'check' : 'subtitles' })) });
       if (pick == null) return;
       await loadOnline(r[+pick]);
       toast(`Subtitles loaded: ${langName(r[+pick].lang)}`);
-    } catch (e) { toast(e.message === 'NO_KEY' ? 'Add your OpenSubtitles key in Settings' : `Subtitles: ${e.message}`, 'err'); }
+    } catch (e) { toast(e.message === 'NO_KEY' ? 'Add a subtitle key in Settings' : `Subtitles: ${e.message}`, 'err'); }
   }
 }
 
@@ -491,7 +500,19 @@ function nextCountdown() {
     <p>Starting in <span id="next-n">${n}</span> s. OK to play now, Back to stop.</p></div>`);
   root().appendChild(box);
   P.paused = false;
-  const go = () => { clearTimeout(P.nextTimer); box.remove(); const q = P.queue.slice(1); playVod(nx.item, nx.key, null, q); };
+  const go = async () => {
+    clearTimeout(P.nextTimer);
+    box.querySelector('p').textContent = 'Preparing the next video…';
+    try {
+      const item = nx.prepare ? await nx.prepare() : nx.item;
+      if (!box.isConnected || P.mode !== 'vod') return;
+      box.remove();
+      playVod(item, nx.key, null, P.queue.slice(1), { forceBuiltIn: !!nx.prepare });
+    } catch (e) {
+      toast('Next video could not start: ' + e.message, 'err');
+      box.remove(); exit();
+    }
+  };
   const tick = () => { n--; const s = document.getElementById('next-n'); if (s) s.textContent = n; if (n <= 0) go(); else P.nextTimer = setTimeout(tick, 1000); };
   P.nextTimer = setTimeout(tick, 1000);
   P.nextGo = go;
