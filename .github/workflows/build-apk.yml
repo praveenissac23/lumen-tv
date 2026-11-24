@@ -82,10 +82,8 @@ jobs:
         run: |
           mkdir -p ../build/apks
           chmod +x gradlew
-          ./gradlew --no-daemon -PtorrentAbi=armeabi-v7a assembleRelease
+          ./gradlew --no-daemon -PtorrentAbi=universal assembleRelease
           cp app/build/outputs/apk/release/app-release.apk ../build/apks/app-release.apk
-          ./gradlew --no-daemon -PtorrentAbi=arm64-v8a assembleRelease
-          cp app/build/outputs/apk/release/app-release.apk ../build/apks/app-arm64.apk
 
       - name: Verify update signature
         env:
@@ -112,7 +110,7 @@ jobs:
           export AAPT
           python3 - <<'PYVERIFY'
           import os, re, subprocess, zipfile
-          for name,abi,limit in [('app-release.apk','armeabi-v7a',6200000),('app-arm64.apk','arm64-v8a',7200000)]:
+          for name,abis,limit in [('app-release.apk',['armeabi-v7a','arm64-v8a'],14000000)]:
               path='build/apks/'+name
               text=subprocess.check_output([os.environ['AAPT'],'dump','badging',path],text=True)
               package=re.search(r"package: name='([^']+)' versionCode='(\d+)'",text)
@@ -120,8 +118,8 @@ jobs:
               assert os.path.getsize(path)<limit, 'APK size budget exceeded: '+name
               with zipfile.ZipFile(path) as apk:
                   libraries=[n for n in apk.namelist() if n.endswith('/libjlibtorrent.so')]
-                  assert libraries==['lib/'+abi+'/libjlibtorrent.so'], 'APK must contain exactly its target architecture'
-              print(name,abi,os.path.getsize(path),'bytes')
+                  assert sorted(libraries)==['lib/'+abi+'/libjlibtorrent.so' for abi in abis], 'APK must contain both ARM architectures'
+              print(name,abis,os.path.getsize(path),'bytes')
           PYVERIFY
 
       - uses: actions/upload-artifact@v4
@@ -145,9 +143,6 @@ jobs:
           gh release create "build-${{ github.run_number }}" build/apks/app-release.apk \
             --title "Lumen TV build ${{ github.run_number }}" \
             --notes "${NOTES:-Manual build}" --draft
-          gh release upload "build-${{ github.run_number }}" build/apks/app-arm64.apk
-          cp build/apks/app-release.apk build/apks/0-fire-cube.apk
-          gh release upload "build-${{ github.run_number }}" build/apks/0-fire-cube.apk
           if [ -f build/vlc-shots/vlc-tests/vlc-direct-video.png ] && [ -f build/vlc-shots/vlc-tests/vlc-torrent-video.png ]; then
             gh release upload "build-${{ github.run_number }}" build/vlc-shots/vlc-tests/vlc-direct-video.png build/vlc-shots/vlc-tests/vlc-torrent-video.png
           fi

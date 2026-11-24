@@ -410,9 +410,9 @@ test('tracker discovery information survives search normalisation and magnet cre
  assert.equal(magnet.searchParams.get('xt'),'urn:btih:'+hash);
 });
 
-for(const [abis,expected] of [[['armeabi-v7a','armeabi'],'app-release.apk'],[['arm64-v8a','armeabi-v7a'],'app-arm64.apk']])test('in-app update chooses '+expected+' for '+abis[0],async()=>{
- const x=setup(async()=>[{tag_name:'build-999',assets:[{name:'app-arm64.apk',browser_download_url:'https://test/64',size:6700000},{name:'app-release.apk',browser_download_url:'https://test/32',size:5900000}]}],{},null,null,{abis,versionCode:60});
- const u=await x.updates.checkForUpdate();assert.equal(u.url,expected==='app-release.apk'?'https://test/32':'https://test/64');
+for(const abis of [['armeabi-v7a','armeabi'],['arm64-v8a','armeabi-v7a']])test('in-app update chooses universal APK for '+abis[0],async()=>{
+ const x=setup(async()=>[{tag_name:'build-999',assets:[{name:'app-arm64.apk',browser_download_url:'https://test/old',size:6700000},{name:'app-release.apk',browser_download_url:'https://test/universal',size:11000000}]}],{},null,null,{abis,versionCode:60});
+ const u=await x.updates.checkForUpdate();assert.equal(u.url,'https://test/universal');
 });
 
 test('Debrid account entry submits on older TV WebViews without Object.fromEntries',async()=>{
