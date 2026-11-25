@@ -12,7 +12,7 @@ const mocks = {
     call: async (_method, url) => {
       calls.push(url);
       if (url.includes('subtitlecat.com/index.php')) return '<a href="subs/123/Show.S01E02.English.html">Show</a>';
-      if (url.includes('subtitlecat.com/subs/123/')) return '<a id="download_ml" href="/subs/456/Show.S01E02-ml.srt">Malayalam</a>';
+      if (url.includes('subtitlecat.com/subs/123/')) return '<a id="download_ml" href="/subs/456/Show.S01E02-ml.srt">Malayalam</a><a id="download_en" href="/subs/456/Show.S01E02-en.srt">English</a>';
       if (url.includes('api.subdl.com')) return JSON.stringify({ status: true, subtitles: [
         { release_name: 'Season', unpack_files: [
           { url: '/subtitle/parent/ep1', name: 'episode1.srt', language: 'EN', episode: 1 },
@@ -47,6 +47,7 @@ const mocks = {
   await subs.loadOnline(results[0]);
   assert.equal(loaded[0][0], 'https://dl.subdl.com/subtitle/parent/ep2');
   assert.equal(await subs.subtitleCatMalayalam({ title: 'Show.S01E02.mkv' }), 'https://www.subtitlecat.com/subs/456/Show.S01E02-ml.srt');
+  assert.equal(await subs.subtitleCatExisting({ title: 'Show.S01E02.mkv' }, 'en'), 'https://www.subtitlecat.com/subs/456/Show.S01E02-en.srt');
   assert.equal(subs.subtitleCatQuery('www.1TamilMV.style - The Court (2026) S01 EP (33-36) TRUE WEB-DL 1080p'),
     'The Court S01E33');
   console.log('Subtitle provider fixtures passed');

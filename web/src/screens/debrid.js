@@ -8,7 +8,7 @@ import { icon, toast, sheet, form } from '../ui.js';
 import { focus, focusFirst } from '../nav.js';
 import { playVod } from '../player.js';
 import * as N from '../native.js';
-import { hasKey, searchSubs, subtitleLink, subtitleCatMalayalam, subtitleCatQuery, langName } from '../subs.js';
+import { hasKey, searchSubs, subtitleLink, subtitleCatExisting, subtitleCatMalayalam, subtitleCatQuery, langName, cachedSubtitle, rememberSubtitle } from '../subs.js';
 
 const displayName = (f) => f.name.split('/').pop();
 const groupCard = (g) => `<button class="f db-collection" data-action="open-series" data-id="${esc(g.id)}"><span class="db-art">${icon('series')}</span><span><b>${esc(g.title)}</b><small>Season ${g.season} · ${g.files.length} videos · episode order ready</small></span><span>Open →</span></button>`;
@@ -57,31 +57,28 @@ export async function playDebrid(fileId, playlistId = '', app, groupIds = null) 
   toast('Getting a fresh AllDebrid playback link…');
   try {
     const item = await playableFile(fileId);
-    let subtitle = '';
-    if (chosen !== 'lumen' && !hasKey() && language !== 'ml')
+    let subtitle = chosen !== 'lumen' ? cachedSubtitle(item, language) : '';
+    if (chosen !== 'lumen' && !subtitle && !hasKey() && language !== 'ml')
       toast('Add a SubDL or OpenSubtitles key in Settings > Subtitles for online subtitles.', 'err');
-    if (chosen !== 'lumen' && (hasKey() || language === 'ml')) {
+    if (chosen !== 'lumen' && !subtitle && (hasKey() || language === 'ml')) {
       const lang = language;
       toast(`Finding ${langName(lang)} subtitles…`);
       try {
-        const matches = hasKey() ? await Promise.race([searchSubs({ title: item.title, url: item.url }, [lang]),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('Subtitle search timed out')), 15000))]) : [];
-        if (matches.length) {
-          const found = await subtitleLink(matches[0]);
-          subtitle = await N.prepareSubtitle(found.link);
-        } else if (lang === 'ml') {
-          // SubtitleCat can supply existing Malayalam translations directly.
-          // When absent, the supported SubDL API can create one with a paid key.
-          let cat = '';
-          const bundled = /\bEP\s*\(\d+\s*-\s*\d+\)/i.test(item.title);
-          if (!bundled) try { cat = await subtitleCatMalayalam(item); } catch { /* site may be unavailable */ }
-          if (cat) subtitle = await N.prepareSubtitle(cat);
-          else {
+        const bundled = /\\bEP\\s*\\(\\d+\\s*-\\s*\\d+\\)/i.test(item.title);
+        const cat = !bundled ? await subtitleCatExisting(item, lang).catch(() => '') : '';
+        if (cat) subtitle = await rememberSubtitle(item, lang, { source: 'SubtitleCat', url: cat }, cat);
+        else {
+          const matches = hasKey() ? await Promise.race([searchSubs({ title: item.title, url: item.url }, [lang]),
+            new Promise((_, reject) => setTimeout(() => reject(new Error('Subtitle search timed out')), 15000))]) : [];
+          if (matches.length) {
+            const found = await subtitleLink(matches[0]);
+            subtitle = await rememberSubtitle(item, lang, matches[0], found.link);
+          } else if (lang === 'ml') {
             const searchUrl = 'https://www.subtitlecat.com/index.php?search=' + encodeURIComponent(subtitleCatQuery(item.title));
             if (N.openSubtitleCat(searchUrl, item.url, playerPkg, item.title)) return;
             throw new Error('The subtitle browser is unavailable on this device.');
-          }
-        } else toast('No English subtitle found. Opening the video.', 'err');
+          } else toast('No English subtitle found. Opening the video.', 'err');
+        }
       } catch (e) {
         if (lang === 'ml') {
           const choice = await sheet({ title: 'Malayalam subtitle unavailable', options: [

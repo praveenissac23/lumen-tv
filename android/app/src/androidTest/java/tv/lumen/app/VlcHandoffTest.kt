@@ -24,13 +24,14 @@ class VlcHandoffTest {
     @Test fun actualVlcPlaysDirectAndTrackerDiscoveredTorrentAndSurvivesEmptyActivityResult() {
         val ins=InstrumentationRegistry.getInstrumentation();val context=ins.targetContext
         context.packageManager.getPackageInfo("org.videolan.vlc",0) // Required test dependency, never silently skipped.
-        val act=ins.startActivitySync(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)) as MainActivity
+        val act=ins.startActivitySync(Intent(context,MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_CLEAR_TASK)) as MainActivity
         val screenshots=File(context.getExternalFilesDir(null),"vlc-tests").apply{mkdirs()}
         fun shell(command:String)=ParcelFileDescriptor.AutoCloseInputStream(ins.uiAutomation.executeShellCommand(command)).bufferedReader().use{it.readText()}
         fun js(expression:String):String {
             val done=CountDownLatch(1);var answer="null"
             ins.runOnMainSync{act.webView.evaluateJavascript(expression){answer=it;done.countDown()}}
-            check(done.await(5,TimeUnit.SECONDS)){"JS bridge did not respond"};return answer
+            if (!done.await(5,TimeUnit.SECONDS)) return "null" // WebView may still be loading; waitFor retries.
+            return answer
         }
         fun waitFor(label:String,timeout:Long=20000,condition:()->Boolean){
             val until=System.currentTimeMillis()+timeout

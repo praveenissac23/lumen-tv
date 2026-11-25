@@ -355,9 +355,11 @@ class NativeBridge(private val act: MainActivity) {
         val vlcSubtitleUrl = if (pkg == "org.videolan.vlc" && subtitleUri != null) {
             val segments = subtitleUri.pathSegments
             val name = segments.getOrNull(1)
-            if (segments.size == 2 && segments[0] == "subtitles" && name != null &&
-                Regex("^[A-Za-z0-9._-]+\\.srt$", RegexOption.IGNORE_CASE).matches(name))
-                runCatching { act.server.publishSubtitle(File(File(act.cacheDir, "subs"), name)) }.getOrNull()
+            if (segments.size == 2 && segments[0] in listOf("subtitles", "saved-subtitles") && name != null &&
+                Regex("^[A-Za-z0-9._-]+\\.srt$", RegexOption.IGNORE_CASE).matches(name)) {
+                val dir = if (segments[0] == "saved-subtitles") File(act.filesDir, "subtitles") else File(act.cacheDir, "subs")
+                runCatching { act.server.publishSubtitle(File(dir, name)) }.getOrNull()
+            }
             else null
         } else null
         val pm = act.packageManager
@@ -640,21 +642,47 @@ class NativeBridge(private val act: MainActivity) {
         return true
     }
 
+    private fun savedSubtitleFile(key: String): File? {
+        if (key.length !in 4..512) return null
+        val digest = java.security.MessageDigest.getInstance("SHA-256")
+            .digest(key.toByteArray(Charsets.UTF_8))
+            .joinToString("") { "%02x".format(it.toInt() and 255) }
+        return File(File(act.filesDir, "subtitles"), "$digest.srt")
+    }
+
     @JavascriptInterface
-    fun prepareSubtitle(id: Int, url: String) {
+    fun cachedSubtitle(key: String): String {
+        val f = savedSubtitleFile(key) ?: return ""
+        return if (f.isFile && f.length() in 20..5_000_000)
+            FileProvider.getUriForFile(act, "${act.packageName}.files", f).toString() else ""
+    }
+
+    @JavascriptInterface
+    fun prepareSubtitle(id: Int, url: String, key: String) {
         io.execute {
             try {
+                val existing = if (key.isNotEmpty()) cachedSubtitle(key) else ""
+                if (existing.isNotEmpty()) {
+                    bodies[id] = existing
+                    emit("call", JSONObject().put("id", id).put("ok", true))
+                    return@execute
+                }
                 require(url.startsWith("https://")) { "Invalid subtitle link" }
-                val dir = File(act.cacheDir, "subs").apply { mkdirs() }
-                dir.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 3 * 86400000L }?.forEach { it.delete() }
+                val permanent = if (key.isNotEmpty()) savedSubtitleFile(key) else null
+                val dir = (permanent?.parentFile ?: File(act.cacheDir, "subs")).apply { mkdirs() }
                 val ext = Regex("\\.(srt|vtt)(\\?|$)", RegexOption.IGNORE_CASE).find(url)?.groupValues?.get(1)?.lowercase() ?: "srt"
-                val file = File(dir, "external-${System.currentTimeMillis()}-$id.$ext")
+                val file = permanent ?: File(dir, "external-${System.currentTimeMillis()}-$id.$ext")
+                val temp = File(dir, "pending-${System.currentTimeMillis()}-$id.srt")
                 try {
-                    Net.download(url, file)
-                    require(file.length() in 1..5_000_000) { "Subtitle file is empty or too large" }
+                    Net.download(url, temp)
+                    require(temp.length() in 20..5_000_000) { "Subtitle file is empty or too large" }
+                    if (!temp.renameTo(file)) {
+                        temp.copyTo(file, overwrite = true)
+                        temp.delete()
+                    }
                     bodies[id] = FileProvider.getUriForFile(act, "${act.packageName}.files", file).toString()
                     emit("call", JSONObject().put("id", id).put("ok", true))
-                } catch (e: Exception) { file.delete(); throw e }
+                } catch (e: Exception) { temp.delete(); throw e }
             } catch (e: Exception) {
                 emit("call", JSONObject().put("id", id).put("ok", false).put("error", e.message ?: "Subtitle download failed"))
             }
@@ -677,7 +705,10 @@ class NativeBridge(private val act: MainActivity) {
                 dir.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 3 * 86400000L }?.forEach { it.delete() }
                 val ext = Regex("\\.(srt|vtt|ass|ssa)(\\?|$)", RegexOption.IGNORE_CASE).find(url)?.groupValues?.get(1)?.lowercase() ?: "srt"
                 val f = File(dir, "${System.currentTimeMillis()}.$ext")
-                Net.download(url, f)
+                if (url.startsWith("content://${act.packageName}.files/")) {
+                    act.contentResolver.openInputStream(Uri.parse(url))?.use { input -> f.outputStream().use { output -> input.copyTo(output) } }
+                        ?: error("Cached subtitle is unavailable")
+                } else Net.download(url, f)
                 ui { act.player.addSubtitle(f, lang, name) }
             } catch (e: Exception) {
                 emit("toast", JSONObject().put("text", "Couldn\u2019t download the subtitles"))

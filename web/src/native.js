@@ -260,10 +260,11 @@ export function tracks() { if (N) { try { return JSON.parse(N.tracks()); } catch
 export function selectTrack(type, id) { if (N) N.selectTrack(type, String(id)); }
 // Download a subtitle file natively and attach it to the current video
 export function loadSubtitle(url, lang, name) { if (N) N.loadSubtitle(url, lang || 'und', name || ''); }
-export function prepareSubtitle(url) {
+export function cachedSubtitle(key) { return N?.cachedSubtitle ? N.cachedSubtitle(key) : ''; }
+export function prepareSubtitle(url, key = '') {
   if (!N?.prepareSubtitle) return Promise.resolve('');
   const id = ++seq;
-  return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); N.prepareSubtitle(id, url); });
+  return new Promise((resolve, reject) => { pending.set(id, { resolve, reject }); N.prepareSubtitle(id, url, key); });
 }
 // TV browser keeps SubtitleCat's download inside Lumen so an SRT can be sent
 // straight to the previously selected external player.

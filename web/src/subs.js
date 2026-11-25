@@ -18,6 +18,24 @@ function headers() {
 }
 export const hasKey = () => !!((setting('osKey') || '').trim() || (setting('subdlKey') || '').trim());
 
+// Save the downloaded SRT under a stable title/language key. A replay can load
+// it immediately, even after an app restart, without another provider download.
+const subtitleIdentity = (item, lang) => ['subfile', String(item.title || '').toLowerCase().trim(),
+  item.year || '', item.season || '', item.episode || '', lang].join(':');
+const fileKey = (result) => result.source === 'OpenSubtitles' ? 'opensubtitles:' + result.fileId : result.source.toLowerCase() + ':' + result.url;
+export function cachedSubtitle(item, lang) {
+  try {
+    const key = N.cacheRead?.(subtitleIdentity(item, lang));
+    return key && N.cachedSubtitle?.(key) || '';
+  } catch { return ''; }
+}
+export async function rememberSubtitle(item, lang, result, url) {
+  const key = fileKey(result);
+  const uri = await N.prepareSubtitle(url, key);
+  if (uri) N.cacheWrite?.(subtitleIdentity(item, lang), key);
+  return uri;
+}
+
 // item: {title, year, season, episode, url}
 export async function searchSubs(item, langs = setting('subLangs')) {
   if (!hasKey()) throw new Error('NO_KEY');
@@ -92,22 +110,26 @@ export async function searchSubs(item, langs = setting('subLangs')) {
 // SubtitleCat publishes already translated SRT files. This is a best-effort
 // search for an existing Malayalam track; its website does not offer a
 // supported translation API for starting a new job from a TV app.
-export async function subtitleCatMalayalam(item) {
-  const title = String(item.title || '').replace(/\.[^.]{2,4}$/, '');
-  const episode = /\b(?:S\d{1,2}E\d{1,3}|EP[ ._-]?\d{1,3})\b/i.exec(title)?.[0]?.replace(/[^A-Z0-9]/gi, '').toLowerCase();
+export async function subtitleCatExisting(item, lang = 'en') {
+  if (!['en', 'ml'].includes(lang)) return '';
+  const title = String(item.title || '').replace(/\\.[^.]{2,4}$/, '');
+  const episode = /\\b(?:S\\d{1,2}E\\d{1,3}|EP[ ._-]?\\d{1,3})\\b/i.exec(title)?.[0]?.replace(/[^A-Z0-9]/gi, '').toLowerCase();
   const base = 'https://www.subtitlecat.com/';
   const html = await N.call('GET', base + 'index.php?search=' + encodeURIComponent(title), {});
-  const pages = [...html.matchAll(/href=["']\/?(subs\/\d+\/[^"'<>]+?\.html)["']/gi)]
+  const pages = [...html.matchAll(/href=["']\\/?(subs\\/\\d+\\/[^"'<>]+?\\.html)["']/gi)]
     .map((m) => m[1]).filter((x, i, all) => all.indexOf(x) === i).slice(0, 8);
   for (const page of pages) {
     const decoded = decodeURIComponent(page).toLowerCase().replace(/[^a-z0-9]/g, '');
     if (episode && !decoded.includes(episode)) continue;
     const detail = await N.call('GET', base + page, {});
-    const link = /<a\b(?=[^>]*\bid=["']download_ml["'])(?=[^>]*\bhref=["']([^"']+\.srt(?:\?[^"']*)?)["'])[^>]*>/i.exec(detail)?.[1];
-    if (link && /^\/?subs\/\d+\//.test(link)) return new URL(link, base).href;
+    const anchor = [...detail.matchAll(/<a\\b[^>]*>/gi)].map((m) => m[0])
+      .find((a) => a.includes('download_' + lang));
+    const link = anchor && /\\bhref=["']([^"']+\\.srt(?:\\?[^"']*)?)["']/i.exec(anchor)?.[1];
+    if (link && /^\\/?subs\\/\\d+\\//.test(link)) return new URL(link, base).href;
   }
   return '';
 }
+export const subtitleCatMalayalam = (item) => subtitleCatExisting(item, 'ml');
 
 export function subtitleCatQuery(title) {
   const clean = String(title || '').replace(/^www\.[^ ]+\s*-\s*/i, '');
@@ -139,11 +161,32 @@ export async function autoSubs(item, notify, prefetched = null, stillCurrent = (
   const t = N.tracks();
   const embedded = t.text.find((x) => langs.includes((x.lang || '').slice(0, 2)));
   if (embedded) { N.selectTrack('text', embedded.id); notify && notify(`Subtitles: ${langName(embedded.lang.slice(0, 2))}`); return; }
-  if (!setting('subAuto') || !hasKey()) return;
+  if (!setting('subAuto')) return;
+  const cached = langs.map((lang) => ({ lang, uri: cachedSubtitle(item, lang) })).find((x) => x.uri);
+  if (cached) {
+    if (stillCurrent()) { N.loadSubtitle(cached.uri, cached.lang, 'Saved subtitle'); notify && notify(`Subtitles: ${langName(cached.lang)}`); }
+    return;
+  }
+  if (langs.includes('en') || langs.includes('ml')) {
+    const language = langs.includes('en') ? 'en' : 'ml';
+    try {
+      const cat = await subtitleCatExisting(item, language);
+      if (cat && stillCurrent()) {
+        const uri = await rememberSubtitle(item, language, { source: 'SubtitleCat', url: cat }, cat);
+        if (stillCurrent()) { N.loadSubtitle(uri || cat, language, 'SubtitleCat'); notify && notify(`Subtitles: ${langName(language)}`); }
+        return;
+      }
+    } catch { /* try another source */ }
+  }
+  if (!hasKey()) return;
   try {
     const r = await (prefetched || searchSubs(item, langs));
     if (!r.length || !stillCurrent()) return;
-    await loadOnline(r[0], stillCurrent);
-    if (stillCurrent()) notify && notify(`Subtitles: ${langName(r[0].lang)}${r[0].hashMatch ? ', matched to this file' : ''}`);
+    const d = await subtitleLink(r[0]);
+    const uri = await rememberSubtitle(item, r[0].lang, r[0], d.link);
+    if (stillCurrent()) {
+      N.loadSubtitle(uri || d.link, r[0].lang, r[0].name);
+      notify && notify(`Subtitles: ${langName(r[0].lang)}${r[0].hashMatch ? ', matched to this file' : ''}`);
+    }
   } catch { /* stay quiet: auto mode */ }
 }
