@@ -90,9 +90,9 @@ class LocalServer(private val onMessage: (JSONObject) -> Unit) {
                 val out = c.getOutputStream()
                 if (valid) {
                     val bytes = file!!.readBytes()
-                    out.write("HTTP/1.1 200 OK\\r\\nContent-Type: application/x-subrip; charset=utf-8\\r\\nContent-Length: ${bytes.size}\\r\\nCache-Control: no-store\\r\\nConnection: close\\r\\n\\r\\n".toByteArray())
+                    out.write("HTTP/1.1 200 OK\r\nContent-Type: application/x-subrip; charset=utf-8\r\nContent-Length: ${bytes.size}\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n".toByteArray())
                     if (method == "GET") { subtitleReads.incrementAndGet(); android.util.Log.i("LumenSubtitle", "served SRT to VLC"); out.write(bytes) }
-                } else out.write("HTTP/1.1 404 Not Found\\r\\nContent-Length: 0\\r\\nConnection: close\\r\\n\\r\\n".toByteArray())
+                } else out.write("HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\nConnection: close\r\n\r\n".toByteArray())
                 out.flush()
                 return
             }
