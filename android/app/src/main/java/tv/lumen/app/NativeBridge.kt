@@ -362,6 +362,8 @@ class NativeBridge(private val act: MainActivity) {
             }
             else null
         } else null
+        if (pkg == "org.videolan.vlc" && subtitleUri != null)
+            android.util.Log.i("LumenSubtitle", "handoff published=${vlcSubtitleUrl != null}; path=${subtitleUri.pathSegments.firstOrNull()}")
         val pm = act.packageManager
         fun base(type: String?): Intent = Intent(Intent.ACTION_VIEW).apply {
             if (type != null) setDataAndType(uri, type) else data = uri
