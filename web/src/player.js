@@ -5,7 +5,7 @@ import { S, set, setting, pushRecentLive, pushRecentVod, saveProgress, progressO
 import { $, esc, hhmm, duration, minutesLeft, now, el } from './util.js';
 import { pushLayer, popLayer, focus } from './nav.js';
 import { icon, logo, progressBar, toast, sheet, form, VList, nowSlot, patchNowSlots } from './ui.js';
-import { autoSubs, searchSubs, loadOnline, hasKey, langName, SUB_LANGS } from './subs.js';
+import { autoSubs, searchSubs, loadOnline, hasKey, hasAutoProvider, langName, SUB_LANGS } from './subs.js';
 import { itemActions, download } from './actions.js';
 import { bgHole } from './look.js';
 
@@ -230,7 +230,7 @@ export function playVod(item, resumeKey, onExit, queue, { forceBuiltIn = false, 
   P.mode = 'vod'; P.item = item; P.resumeKey = resumeKey; P.ch = null;
   P.queue = queue || []; P.subsTried = false; clearTimeout(P.nextTimer);
   // Search while the stream buffers; applying a track waits for the player's ready event.
-  P.subsPromise = setting('subAuto') && hasKey() ? searchSubs(subItem(item)).catch(() => []) : null;
+  P.subsPromise = setting('subAuto') && hasAutoProvider() ? searchSubs(subItem(item), undefined, { automatic: true }).catch(() => []) : null;
   subsBox().innerHTML = '';
   const prog = resumeKey && progressOf(resumeKey);
   P.pos = prog ? prog.pos : 0; P.dur = prog ? prog.dur : 0;

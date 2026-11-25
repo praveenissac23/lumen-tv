@@ -17,10 +17,11 @@ function headers() {
   return { 'Api-Key': setting('osKey'), 'User-Agent': UA, Accept: 'application/json', 'Content-Type': 'application/json' };
 }
 export const hasKey = () => !!((setting('osKey') || '').trim() || (setting('subdlKey') || '').trim());
+export const hasAutoProvider = () => !!(setting('subdlKey') || '').trim();
 
 // Save the downloaded SRT under a stable title/language key. A replay can load
 // it immediately, even after an app restart, without another provider download.
-const subtitleIdentity = (item, lang) => ['subfile', String(item.title || '').toLowerCase().trim(),
+const subtitleIdentity = (item, lang) => ['subfile', String(item.title || '').toLowerCase().trim().slice(0,140),
   item.year || '', item.season || '', item.episode || '', lang].join(':');
 const fileKey = (result) => result.source === 'OpenSubtitles' ? 'opensubtitles:' + result.fileId : result.source.toLowerCase() + ':' + result.url;
 export function cachedSubtitle(item, lang) {
@@ -37,9 +38,9 @@ export async function rememberSubtitle(item, lang, result, url) {
 }
 
 // item: {title, year, season, episode, url}
-export async function searchSubs(item, langs = setting('subLangs')) {
+export async function searchSubs(item, langs = setting('subLangs'), { automatic = false } = {}) {
   if (!hasKey()) throw new Error('NO_KEY');
-  const osKey = (setting('osKey') || '').trim();
+  const osKey = automatic ? '' : (setting('osKey') || '').trim();
   const sdKey = (setting('subdlKey') || '').trim();
   const q = new URLSearchParams();
   q.set('languages', (langs && langs.length ? langs : ['en']).join(','));
@@ -112,20 +113,20 @@ export async function searchSubs(item, langs = setting('subLangs')) {
 // supported translation API for starting a new job from a TV app.
 export async function subtitleCatExisting(item, lang = 'en') {
   if (!['en', 'ml'].includes(lang)) return '';
-  const title = String(item.title || '').replace(/\\.[^.]{2,4}$/, '');
-  const episode = /\\b(?:S\\d{1,2}E\\d{1,3}|EP[ ._-]?\\d{1,3})\\b/i.exec(title)?.[0]?.replace(/[^A-Z0-9]/gi, '').toLowerCase();
+  const title = String(item.title || '').replace(/\.[^.]{2,4}$/, '');
+  const episode = /\b(?:S\d{1,2}E\d{1,3}|EP[ ._-]?\d{1,3})\b/i.exec(title)?.[0]?.replace(/[^A-Z0-9]/gi, '').toLowerCase();
   const base = 'https://www.subtitlecat.com/';
   const html = await N.call('GET', base + 'index.php?search=' + encodeURIComponent(title), {});
-  const pages = [...html.matchAll(/href=["']\\/?(subs\\/\\d+\\/[^"'<>]+?\\.html)["']/gi)]
+  const pages = [...html.matchAll(/href=["']\/?(subs\/\d+\/[^"'<>]+?\.html)["']/gi)]
     .map((m) => m[1]).filter((x, i, all) => all.indexOf(x) === i).slice(0, 8);
   for (const page of pages) {
     const decoded = decodeURIComponent(page).toLowerCase().replace(/[^a-z0-9]/g, '');
     if (episode && !decoded.includes(episode)) continue;
     const detail = await N.call('GET', base + page, {});
-    const anchor = [...detail.matchAll(/<a\\b[^>]*>/gi)].map((m) => m[0])
+    const anchor = [...detail.matchAll(/<a\b[^>]*>/gi)].map((m) => m[0])
       .find((a) => a.includes('download_' + lang));
-    const link = anchor && /\\bhref=["']([^"']+\\.srt(?:\\?[^"']*)?)["']/i.exec(anchor)?.[1];
-    if (link && /^\\/?subs\\/\\d+\\//.test(link)) return new URL(link, base).href;
+    const link = anchor && /\bhref=["']([^"']+\.srt(?:\?[^"']*)?)["']/i.exec(anchor)?.[1];
+    if (link && /^\/?subs\/\d+\//.test(link)) return new URL(link, base).href;
   }
   return '';
 }
@@ -178,9 +179,9 @@ export async function autoSubs(item, notify, prefetched = null, stillCurrent = (
       }
     } catch { /* try another source */ }
   }
-  if (!hasKey()) return;
+  if (!hasAutoProvider()) return;
   try {
-    const r = await (prefetched || searchSubs(item, langs));
+    const r = await (prefetched || searchSubs(item, langs, { automatic: true }));
     if (!r.length || !stillCurrent()) return;
     const d = await subtitleLink(r[0]);
     const uri = await rememberSubtitle(item, r[0].lang, r[0], d.link);

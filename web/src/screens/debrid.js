@@ -8,7 +8,7 @@ import { icon, toast, sheet, form } from '../ui.js';
 import { focus, focusFirst } from '../nav.js';
 import { playVod } from '../player.js';
 import * as N from '../native.js';
-import { hasKey, searchSubs, subtitleLink, subtitleCatExisting, subtitleCatMalayalam, subtitleCatQuery, langName, cachedSubtitle, rememberSubtitle } from '../subs.js';
+import { hasAutoProvider, searchSubs, subtitleLink, subtitleCatExisting, subtitleCatQuery, langName, cachedSubtitle, rememberSubtitle } from '../subs.js';
 
 const displayName = (f) => f.name.split('/').pop();
 const groupCard = (g) => `<button class="f db-collection" data-action="open-series" data-id="${esc(g.id)}"><span class="db-art">${icon('series')}</span><span><b>${esc(g.title)}</b><small>Season ${g.season} · ${g.files.length} videos · episode order ready</small></span><span>Open →</span></button>`;
@@ -58,17 +58,15 @@ export async function playDebrid(fileId, playlistId = '', app, groupIds = null) 
   try {
     const item = await playableFile(fileId);
     let subtitle = chosen !== 'lumen' ? cachedSubtitle(item, language) : '';
-    if (chosen !== 'lumen' && !subtitle && !hasKey() && language !== 'ml')
-      toast('Add a SubDL or OpenSubtitles key in Settings > Subtitles for online subtitles.', 'err');
-    if (chosen !== 'lumen' && !subtitle && (hasKey() || language === 'ml')) {
+    if (chosen !== 'lumen' && !subtitle) {
       const lang = language;
       toast(`Finding ${langName(lang)} subtitles…`);
       try {
-        const bundled = /\\bEP\\s*\\(\\d+\\s*-\\s*\\d+\\)/i.test(item.title);
+        const bundled = /\bEP\s*\(\d+\s*-\s*\d+\)/i.test(item.title);
         const cat = !bundled ? await subtitleCatExisting(item, lang).catch(() => '') : '';
         if (cat) subtitle = await rememberSubtitle(item, lang, { source: 'SubtitleCat', url: cat }, cat);
         else {
-          const matches = hasKey() ? await Promise.race([searchSubs({ title: item.title, url: item.url }, [lang]),
+          const matches = hasAutoProvider() ? await Promise.race([searchSubs({ title: item.title, url: item.url }, [lang], { automatic: true }),
             new Promise((_, reject) => setTimeout(() => reject(new Error('Subtitle search timed out')), 15000))]) : [];
           if (matches.length) {
             const found = await subtitleLink(matches[0]);
@@ -77,7 +75,7 @@ export async function playDebrid(fileId, playlistId = '', app, groupIds = null) 
             const searchUrl = 'https://www.subtitlecat.com/index.php?search=' + encodeURIComponent(subtitleCatQuery(item.title));
             if (N.openSubtitleCat(searchUrl, item.url, playerPkg, item.title)) return;
             throw new Error('The subtitle browser is unavailable on this device.');
-          } else toast('No English subtitle found. Opening the video.', 'err');
+          } else toast('No English subtitle found on SubtitleCat. Add a free SubDL key in Settings for another automatic source.', 'err');
         }
       } catch (e) {
         if (lang === 'ml') {
