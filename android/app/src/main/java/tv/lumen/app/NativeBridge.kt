@@ -351,13 +351,12 @@ class NativeBridge(private val act: MainActivity) {
             // Android 11+: other apps cannot see Android/data, so the copy goes to Download/Lumen
             val resolver = act.contentResolver
             val downloads = android.provider.MediaStore.Downloads.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
-            val cols = android.provider.MediaStore.MediaColumns
-            runCatching { resolver.delete(downloads, "${cols.DISPLAY_NAME}=?", arrayOf(name)) }
+            runCatching { resolver.delete(downloads, "${android.provider.MediaStore.MediaColumns.DISPLAY_NAME}=?", arrayOf(name)) }
             val row = resolver.insert(downloads, android.content.ContentValues().apply {
-                put(cols.DISPLAY_NAME, name); put(cols.MIME_TYPE, "application/x-subrip"); put(cols.RELATIVE_PATH, "Download/Lumen")
+                put(android.provider.MediaStore.MediaColumns.DISPLAY_NAME, name); put(android.provider.MediaStore.MediaColumns.MIME_TYPE, "application/x-subrip"); put(android.provider.MediaStore.MediaColumns.RELATIVE_PATH, "Download/Lumen")
             }) ?: error("No place for the subtitle")
             resolver.openOutputStream(row)?.use { out -> src.inputStream().use { it.copyTo(out) } } ?: error("Cannot write the subtitle")
-            resolver.query(row, arrayOf(cols.DATA), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+            resolver.query(row, arrayOf(android.provider.MediaStore.MediaColumns.DATA), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
                 ?: File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "Lumen/$name").absolutePath
         } else {
             val dir = File(act.getExternalFilesDir(null) ?: error("No shared storage"), "subs").apply { mkdirs() }
