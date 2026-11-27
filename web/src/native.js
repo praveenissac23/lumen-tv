@@ -260,6 +260,8 @@ export function tracks() { if (N) { try { return JSON.parse(N.tracks()); } catch
 export function selectTrack(type, id) { if (N) N.selectTrack(type, String(id)); }
 // Download a subtitle file natively and attach it to the current video
 export function loadSubtitle(url, lang, name) { if (N) N.loadSubtitle(url, lang || 'und', name || ''); }
+// Keep subtitle text made in the app (a translation) as a file players can open; '' on older builds.
+export const saveSubtitle = N && N.saveSubtitle ? (key, content) => N.saveSubtitle(key, content) : null;
 export function cachedSubtitle(key) { return N?.cachedSubtitle ? N.cachedSubtitle(key) : ''; }
 export function prepareSubtitle(url, key = '') {
   if (!N?.prepareSubtitle) return Promise.resolve('');

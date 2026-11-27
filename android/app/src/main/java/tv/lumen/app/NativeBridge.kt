@@ -659,6 +659,20 @@ class NativeBridge(private val act: MainActivity) {
             FileProvider.getUriForFile(act, "${act.packageName}.files", f).toString() else ""
     }
 
+    /** Stores subtitle text produced in the app (a translation) under the same keys as downloads. */
+    @JavascriptInterface
+    fun saveSubtitle(key: String, content: String): String {
+        return try {
+            val f = savedSubtitleFile(key) ?: return ""
+            require(content.length in 20..5_000_000 && content.contains("-->")) { "Not a subtitle" }
+            f.parentFile?.mkdirs()
+            val temp = File(f.parentFile, f.name + ".tmp")
+            temp.writeText(content, Charsets.UTF_8)
+            if (!temp.renameTo(f)) { temp.copyTo(f, overwrite = true); temp.delete() }
+            FileProvider.getUriForFile(act, "${act.packageName}.files", f).toString()
+        } catch (e: Exception) { "" }
+    }
+
     @JavascriptInterface
     fun prepareSubtitle(id: Int, url: String, key: String) {
         io.execute {

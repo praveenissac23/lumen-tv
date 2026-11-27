@@ -123,9 +123,13 @@ export class DetailScreen {
     if (!this.item) { view.innerHTML = '<div class="empty"><h2>This title is no longer in your playlist</h2></div>'; return; }
     this.season = params.restore?.season || null;
     this.render();
-    if (this.kind === 'movie' && subtitleLanguage()) findSubtitle({ title: this.item.name, year: this.item.year }, subtitleLanguage()).catch(() => {});
+    // once the film's length is known, fetch its subtitle ahead of Play (checked against that length)
     this.infoP = this.kind === 'movie'
-      ? vodInfo(this.item.id).then((i) => { if (i) this.fill(i); return i; }).catch(() => null)
+      ? vodInfo(this.item.id).then((i) => { if (i) this.fill(i); return i; }).catch(() => null).then((i) => {
+        this.durSecs = (i && i.durSecs) || 0;
+        if (subtitleLanguage()) findSubtitle(this.subQuery(), subtitleLanguage()).catch(() => {});
+        return i;
+      })
       : seriesInfo(this.item.id).then((i) => { this.info = i; this.fill(i); this.paintSeasons(); return i; }).catch(() => { this.paintSeasons(); return null; });
   }
 
@@ -220,6 +224,7 @@ export class DetailScreen {
     this.epList.setItems(eps, 0);
   }
 
+  subQuery() { return { title: this.item.name, year: this.item.year, durSecs: this.durSecs || 0 }; }
   epItem(season, ep) {
     const it = this.item;
     return { title: it.name, sub: `Season ${season}, episode ${ep.num}: ${ep.title}`, url: episodeUrl(ep), poster: it.img, ext: ep.ext,
@@ -246,7 +251,7 @@ export class DetailScreen {
     if (a === 'play' || a === 'resume') {
       const key = 'movie:' + it.id;
       if (a === 'play') { const p = progressOf(key); if (p) p.pos = 0; }
-      playVod({ title: it.name, sub: it.year ? String(it.year) : '', url: movieUrl(it), poster: it.img, ext: it.ext, kind: 'movie', id: it.id, year: it.year }, key, () => this.app.reload());
+      playVod({ title: it.name, sub: it.year ? String(it.year) : '', url: movieUrl(it), poster: it.img, ext: it.ext, kind: 'movie', id: it.id, year: it.year, durSecs: this.durSecs || 0 }, key, () => this.app.reload());
     } else if (a === 'next') {
       const n = this.nextEpisode();
       if (!n) { toast('Episodes are still loading'); return; }
@@ -256,7 +261,7 @@ export class DetailScreen {
       const cur = subtitleLanguage();
       const v = await sheet({ title: 'Subtitles for films and series', options: [
         { label: 'English', value: 'en', on: cur === 'en', icon: 'subtitles', hint: 'Found when you press Play' },
-        { label: 'Malayalam', value: 'ml', on: cur === 'ml', icon: 'subtitles', hint: 'When a Malayalam file exists' },
+        { label: 'Malayalam', value: 'ml', on: cur === 'ml', icon: 'subtitles', hint: 'Ready-made, or translated for you' },
         { label: 'No subtitles', value: 'off', on: !cur, icon: 'eyeOff' },
       ] });
       if (!v) return;
@@ -264,7 +269,11 @@ export class DetailScreen {
       const lab = this.view.querySelector('#dt-sublang');
       if (lab) lab.textContent = `${v === 'off' ? 'No' : langName(v)} subtitles`;
       // fetch it now, so Play starts with the subtitle already on this device
-      if (v !== 'off' && this.kind === 'movie') findSubtitle({ title: it.name, year: it.year }, v).then((f) => { if (!f) toast(`No ${langName(v)} subtitles found for this title`); }).catch(() => {});
+      if (v !== 'off' && this.kind === 'movie') {
+        let told = false;
+        findSubtitle(this.subQuery(), v, { onProgress: (pct) => { if (!told || pct === 100) { told = true; toast(pct === 100 ? `${langName(v)} subtitles are ready` : `Translating subtitles to ${langName(v)} in the background…`); } } })
+          .then((f) => { if (!f) toast(`No ${langName(v)} subtitles found for this title`); }).catch(() => {});
+      }
     } else if (a === 'download') {
       download('movie', it);
     } else if (a === 'more') {

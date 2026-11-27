@@ -160,7 +160,10 @@ export function subtitleCatCandidates(html, target) {
     // a longer title that merely begins with ours ("Alien" vs "Alien Romulus") only counts when the year agrees
     const rest = starts ? n.slice(want.length).trim() : '';
     const exact = starts && (!rest || /^(?:(?:19|20)\d{2}|s\d{1,2} ?e\d|\d{3,4}p|bluray|brrip|web|hdrip|dvdrip|extended|remastered|unrated|proper|repack|en|eng|english)\b/.test(rest));
-    const score = (exact ? 4 : 0) + (starts ? 1 : 0) + (target.year && years.includes(target.year) ? 3 : 0) - i * 0.01;
+    // the rest of the result row: users' thumbs-up, and which language the upload was in
+    const row = html.slice(m.index, m.index + 600).split(/<\/tr>/i)[0];
+    const score = (exact ? 4 : 0) + (starts ? 1 : 0) + (target.year && years.includes(target.year) ? 3 : 0)
+      + (/translated from English/i.test(row) ? 0.6 : 0) + (/\u{1F44D}|Rated good/u.test(row) ? 0.4 : 0) - i * 0.01;
     out.push({ page, score }); i++;
   }
   return out.sort((x, y) => y.score - x.score).map((x) => x.page);
@@ -181,43 +184,155 @@ export function subtitleCatLink(detail, lang) {
   return ok(u) ? u.href.replace(/^http:/, 'https:') : '';
 }
 
-const catMemo = new Map();
-export function subtitleCatExisting(item, lang = 'en') {
-  const t = subtitleTarget(item);
-  const key = [norm(t.title), t.year, t.season, t.episode, lang].join('|');
-  if (!catMemo.has(key)) {
-    const p = catLookup(t, lang).catch((e) => { catMemo.delete(key); throw e; });
-    catMemo.set(key, p);
-    if (catMemo.size > 60) catMemo.delete(catMemo.keys().next().value);
-  }
-  return catMemo.get(key);
+// The original upload behind a page's "Translate" button (what the site itself translates from).
+export function subtitleCatOriginal(detail, lang) {
+  const m = new RegExp("translate_from_server_folder\\(\\s*'" + lang + "'\\s*,\\s*'([^']+\\.srt)'\\s*,\\s*'(\\/subs\\/\\d+\\/?)'").exec(detail);
+  if (!m || /[\\<>"]|\.\./.test(m[1])) return '';
+  return CAT.slice(0, -1) + m[2].replace(/\/?$/, '/') + encodeURIComponent(m[1]);
 }
-async function catLookup(t, lang) {
-  if (!t.title) return '';
-  const queries = t.episode ? [`${t.title} S${two(t.season || 1)}E${two(t.episode)}`]
-    : t.year ? [`${t.title} ${t.year}`, t.title] : [t.title];
-  for (const q of queries) {
-    const html = await N.call('GET', CAT + 'index.php?search=' + encodeURIComponent(q), BROWSER);
-    const pages = subtitleCatCandidates(html, t).slice(0, 4);
-    if (!pages.length) continue;
-    // open the best few at once; take the best-ranked one that has the language ready
-    const links = await Promise.all(pages.map((page) => N.call('GET', CAT + page, BROWSER).then((d) => subtitleCatLink(d, lang), () => '')));
-    const hit = links.find(Boolean);
-    if (hit) return hit;
+
+// The best few pages for a title, opened once and shared by every language asked for.
+const pageMemo = new Map();
+function catPages(t) {
+  const key = [norm(t.title), t.year, t.season, t.episode].join('|');
+  if (!pageMemo.has(key)) {
+    const p = (async () => {
+      if (!t.title) return [];
+      const queries = t.episode ? [`${t.title} S${two(t.season || 1)}E${two(t.episode)}`]
+        : t.year ? [`${t.title} ${t.year}`, t.title] : [t.title];
+      for (const q of queries) {
+        const html = await N.call('GET', CAT + 'index.php?search=' + encodeURIComponent(q), BROWSER);
+        const pages = subtitleCatCandidates(html, t).slice(0, 4);
+        if (!pages.length) continue;
+        const details = await Promise.all(pages.map((page) => N.call('GET', CAT + page, BROWSER).catch(() => '')));
+        return pages.map((page, i) => ({ page, detail: details[i] })).filter((x) => x.detail);
+      }
+      return [];
+    })().catch((e) => { pageMemo.delete(key); throw e; });
+    pageMemo.set(key, p);
+    if (pageMemo.size > 40) pageMemo.delete(pageMemo.keys().next().value);
   }
+  return pageMemo.get(key);
+}
+// Link of a ready-made file in this language ('' when there is none yet).
+export async function subtitleCatExisting(item, lang = 'en') {
+  const pages = await catPages(subtitleTarget(item));
+  for (const x of pages) { const link = subtitleCatLink(x.detail, lang); if (link) return link; }
   return '';
 }
 
+// ---------- checks and translation ----------
+// When the last line is spoken, in seconds (0 when the text is not a subtitle file).
+export function srtEnd(text) {
+  if (/^\s*</.test(text)) return 0;
+  const re = /-->\s*(\d{1,2}):(\d{2}):(\d{2})[,.](\d{1,3})/g;
+  let m, end = 0;
+  while ((m = re.exec(text))) end = Math.max(end, +m[1] * 3600 + +m[2] * 60 + +m[3]);
+  return end;
+}
+// A subtitle for another cut or another film ends at the wrong time: accept only what fits the video.
+export function fitsVideo(text, durSecs) {
+  const end = srtEnd(text);
+  if (!end) return false;
+  if (!(durSecs > 600)) return true;   // length unknown: nothing to compare with
+  return end > durSecs * 0.55 && end < durSecs + 240;
+}
+
+const G = 'https://translate.googleapis.com/translate_a/single?client=gtx&sl=auto&dt=t';
+async function gTranslate(text, lang) {
+  let last;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    try {
+      const d = JSON.parse(await N.call('GET', `${G}&tl=${lang}&q=${encodeURIComponent(text)}`, BROWSER));
+      return (d[0] || []).map((x) => x[0] || '').join('');
+    } catch (e) { last = e; await new Promise((r) => setTimeout(r, 900 * (attempt + 1))); }
+  }
+  throw last || new Error('Translation failed');
+}
+// Translate the spoken lines of an SRT, keeping numbers and timings exactly (the same service and
+// method SubtitleCat's Translate button uses, in larger pieces and four at a time).
+export async function translateSrt(text, lang, onProgress) {
+  const lines = String(text).replace(/\r/g, '').split('\n');
+  const out = lines.slice();
+  const batches = [];
+  let cur = { idx: [], text: '' };
+  for (let i = 0; i < lines.length; i++) {
+    const l = lines[i];
+    if (/^[0-9 ]*$/.test(l) || /^[0-9,.: ]*-->/.test(l)) continue;
+    const clean = l.replace(/<[^>]+>/g, '').replace(/\{\\[^}]*\}/g, '').replace(/&/g, 'and').trim();
+    if (!clean) { out[i] = ''; continue; }
+    if (cur.idx.length && cur.text.length + clean.length + 1 > 1300) { batches.push(cur); cur = { idx: [], text: '' }; }
+    cur.text += (cur.idx.length ? '\n' : '') + clean; cur.idx.push(i);
+  }
+  if (cur.idx.length) batches.push(cur);
+  let done = 0, next = 0, failed = null;
+  const worker = async () => {
+    while (next < batches.length && !failed) {
+      const b = batches[next++];
+      try {
+        let parts = (await gTranslate(b.text, lang)).split('\n');
+        if (parts.length !== b.idx.length) {
+          // the lines came back merged: do this piece line by line
+          const src = b.text.split('\n');
+          parts = [];
+          for (const one of src) parts.push((await gTranslate(one, lang)).replace(/\n/g, ' '));
+        }
+        b.idx.forEach((li, k) => { out[li] = parts[k].trim(); });
+      } catch (e) { failed = e; return; }
+      done++;
+      onProgress && onProgress(Math.round((done / batches.length) * 100));
+    }
+  };
+  await Promise.all([worker(), worker(), worker(), worker()]);
+  if (failed) throw failed;
+  return out.join('\n');
+}
+
 // One place that answers "which subtitle file goes with this film / episode": the copy saved on
-// this device, else SubtitleCat, else SubDL when a key is set. Resolves to { uri, lang, source } or null.
-export async function findSubtitle(item, lang = 'en') {
+// this device, else SubtitleCat (a ready file, else its original translated here), else SubDL when
+// a key is set. Resolves to { uri, lang, source } or null. Asking twice shares one search.
+const jobs = new Map();
+export function findSubtitle(item, lang = 'en', { onProgress } = {}) {
   const saved = cachedSubtitle(item, lang);
-  if (saved) return { uri: saved, lang, source: 'Saved' };
+  if (saved) return Promise.resolve({ uri: saved, lang, source: 'Saved' });
+  const key = subtitleIdentity(item, lang);
+  let job = jobs.get(key);
+  if (!job) {
+    job = { listeners: new Set(), pct: -1 };
+    job.promise = lookup(item, lang, (pct) => { job.pct = pct; job.listeners.forEach((fn) => fn(pct)); })
+      .then((r) => { if (!r) setTimeout(() => jobs.delete(key), 60000); else jobs.delete(key); return r; },
+        (e) => { jobs.delete(key); throw e; });
+    jobs.set(key, job);
+  }
+  if (onProgress) { job.listeners.add(onProgress); if (job.pct >= 0) onProgress(job.pct); }
+  return job.promise;
+}
+const srtText = (url) => N.call('GET', url, BROWSER);
+async function lookup(item, lang, progress) {
+  const dur = +item.durSecs || 0;
+  const key = fileKey({ source: 'SubtitleCat', url: `${subtitleIdentity(item, lang)}` });
   try {
-    const cat = await subtitleCatExisting(item, lang);
-    if (cat) {
-      const uri = await rememberSubtitle(item, lang, { source: 'SubtitleCat', url: cat }, cat).catch(() => '');
-      return { uri: uri || cat, lang, source: 'SubtitleCat' };
+    const pages = await catPages(subtitleTarget(item));
+    // 1. a file already in this language
+    for (const x of pages) {
+      const link = subtitleCatLink(x.detail, lang);
+      if (!link) continue;
+      if (dur) { const text = await srtText(link).catch(() => ''); if (!fitsVideo(text, dur)) continue; }
+      const uri = await rememberSubtitle(item, lang, { source: 'SubtitleCat', url: link }, link).catch(() => '');
+      return { uri: uri || link, lang, source: 'SubtitleCat' };
+    }
+    // 2. none yet: translate the page's original here (needs somewhere to keep the result)
+    if (lang !== 'en' && N.saveSubtitle) {
+      for (const x of pages) {
+        const orig = subtitleCatLink(x.detail, 'en') || subtitleCatOriginal(x.detail, lang);
+        if (!orig) continue;
+        const text = await srtText(orig).catch(() => '');
+        if (!fitsVideo(text, dur)) continue;
+        progress(0);
+        const translated = await translateSrt(text, lang, progress);
+        const uri = N.saveSubtitle(key, translated);
+        if (uri) { N.cacheWrite?.(subtitleIdentity(item, lang), key); return { uri, lang, source: 'SubtitleCat, translated' }; }
+      }
     }
   } catch (e) { /* next source */ }
   if (hasAutoProvider()) {
