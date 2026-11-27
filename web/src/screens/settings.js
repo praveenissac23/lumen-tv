@@ -220,7 +220,7 @@ export class SettingsScreen {
       ${this.row('Find subtitles automatically', this.toggle(setting('subAuto')), 'tog', 'subAuto', 'For films and episodes, in your first language below')}
       ${this.row('OpenSubtitles API key', key ? 'Saved' : '<span class="pill">Add</span>', 'oskey', '', key ? key.slice(0, 4) + '…' + key.slice(-3) : 'Free: sign up at opensubtitles.com, then Profile > API consumers')}
       ${this.row('SubDL API key', subdlKey ? 'Saved' : '<span class="pill">Add</span>', 'subdlkey', '', 'Alternative subtitle source · Get a free key from subdl.com')}
-      ${this.row('Subtitle size', { s: 'Small', m: 'Medium', l: 'Large' }[setting('subSize') || 'm'], 'pick', 'subSize')}
+      ${this.row('Subtitle size', { xs: 'Very small', s: 'Small', m: 'Medium', l: 'Large', xl: 'Very large' }[setting('subSize') || 'm'], 'pick', 'subSize')}
       <h2>Languages, in order of preference</h2>
       ${SUB_LANGS.map(([iso, nm]) => this.row(nm, `${langs.includes(iso) ? `<span class="order">${langs.indexOf(iso) + 1}</span>` : ''}${this.toggle(langs.includes(iso))}`, 'sublang', iso)).join('')}`;
   }
@@ -416,7 +416,7 @@ export class SettingsScreen {
         refreshSeries: DAY_OPTS,
         refreshGuideH: HOUR_OPTS,
         homeLayout: [['billboard', 'Preview banner (focused title on top)'], ['rows', 'Just rows'], ['hero', 'Live preview on top'], ['shortcuts', 'Shortcut buttons'], ['spotlight', 'Big Continue card'], ['compact', 'Compact rows']],
-        subSize: [['s', 'Small'], ['m', 'Medium'], ['l', 'Large']],
+        subSize: [['xs', 'Very small'], ['s', 'Small'], ['m', 'Medium'], ['l', 'Large'], ['xl', 'Very large']],
         uiSize: [['s', 'Smaller (if edges are cut off)'], ['m', 'Fit the TV'], ['l', 'Larger']],
       }[arg];
       const cur = setting(arg) ?? choices[0][0];

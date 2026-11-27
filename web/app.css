@@ -531,7 +531,7 @@ body.playing .player-ui { display: block; }
 body.playing #subs { display: block; }
 .player-ui.osd ~ #subs { bottom: 300px; }
 #subs span { background: rgba(0, 0, 0, .72); color: #fff; padding: 2px 14px; border-radius: 6px; box-decoration-break: clone; -webkit-box-decoration-break: clone; font-weight: 600; }
-#subs.size-s { font-size: 34px; } #subs.size-m { font-size: 44px; } #subs.size-l { font-size: 56px; }
+#subs.size-xs { font-size: 28px; } #subs.size-s { font-size: 36px; } #subs.size-m { font-size: 46px; } #subs.size-l { font-size: 60px; } #subs.size-xl { font-size: 76px; }
 
 .next-up { position: absolute; right: 96px; top: 96px; z-index: 32; width: 620px; padding: 32px 36px; border-radius: 20px; background: rgba(18, 22, 27, .94); box-shadow: 0 30px 60px rgba(0, 0, 0, .5); border-left: 6px solid var(--brass); }
 .next-up small { color: var(--brass-2); font-size: 22px; }
@@ -882,3 +882,7 @@ body.lite .row-track, body.lite .home-track, body.lite .sr-track, body.lite .st-
 .dt-subs-status.ok { color: #6fe3a1; }
 .dt-subs-status.err { color: #ffb38a; }
 .dt-subs-status.busy::before { content: ''; display: inline-block; width: 10px; height: 10px; border-radius: 50%; background: var(--brass); margin-right: 10px; animation: updPulse 1s infinite alternate; }
+
+.osd-jump { margin-left: 14px; padding: 2px 14px; border-radius: 16px; background: var(--grad); color: #fff; font-weight: 700; font-size: 26px; }
+.osd-jump[hidden] { display: none; }
+body:has(.sheet-wrap) #subs.previewing { opacity: 1; }

@@ -114,6 +114,8 @@ class PlayerHost(
             .setMediaSourceFactory(DefaultMediaSourceFactory(data, extractors)
                 .setLoadErrorHandlingPolicy(DefaultLoadErrorHandlingPolicy(if (live) 3 else 8)))
             .build()
+        // films: jump to the nearest key picture, so skipping lands at once instead of decoding up to the exact frame
+        if (!live) p.setSeekParameters(androidx.media3.exoplayer.SeekParameters.CLOSEST_SYNC)
         p.setAudioAttributes(
             AudioAttributes.Builder().setUsage(C.USAGE_MEDIA).setContentType(C.AUDIO_CONTENT_TYPE_MOVIE).build(),
             true,

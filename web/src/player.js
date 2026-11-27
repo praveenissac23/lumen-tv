@@ -256,11 +256,22 @@ export function playVod(item, resumeKey, onExit, queue, { forceBuiltIn = false, 
   pushRecentVod({ key: resumeKey, kind: section === 'series' ? 'episode' : 'movie', id: item.id, seriesId: item.seriesId, title: item.seriesName || item.title,
     sub: item.sub || '', poster: item.poster, url: item.url, ext: item.ext,
     ...(item.torrentItem ? { torrentItem: item.torrentItem, torrentEpisode: item.torrentEpisode } : {}) });
+  // films and episodes from the playlist take their subtitle along to whichever player opens them
+  const wantsSub = !item.torrentItem && /^(movie|ep):/.test(resumeKey || '') && (item.subLang != null ? item.subLang : subtitleLanguage());
   if (playerPkg && !P.mode) {
-    if (P.previewCh) stopPreview();
-    const ok = N.openWith(playerPkg, urlOr(item.url), { title, mode: 'play', position: saved ? Math.round(saved.pos) : 0, subtitle });
-    if (ok !== false) { P.ext = { item, resumeKey, startedAt: Date.now() }; return; }
-    toast('That player could not open this video. Playing in Lumen TV.', 'err');
+    if (handingOver) { skipWait && skipWait(); return; }
+    const open = (sub) => {
+      if (P.previewCh) stopPreview();
+      const ok = N.openWith(playerPkg, urlOr(item.url), { title, mode: 'play', position: saved ? Math.round(saved.pos) : 0, subtitle: sub });
+      if (ok !== false) { P.ext = { item, resumeKey, startedAt: Date.now() }; return; }
+      toast('That player could not open this video. Playing in Lumen TV.', 'err');
+      playVod(item, resumeKey, onExit, queue, { forceBuiltIn: true });
+    };
+    if (subtitle || !wantsSub) { open(subtitle); return; }
+    handingOver = true;
+    toast(`Finding ${langName(wantsSub)} subtitles…`);
+    subtitleFor(item).then((sub) => { handingOver = false; if (!P.mode) open(sub); }, () => { handingOver = false; open(''); });
+    return;
   }
   if (!forceBuiltIn && !playerPkg && !P.mode && defaultPlayerApp(section)) {
     if (handingOver) { skipWait && skipWait(); return; }
@@ -271,7 +282,7 @@ export function playVod(item, resumeKey, onExit, queue, { forceBuiltIn = false, 
       } else playVod(item, resumeKey, onExit, queue, { forceBuiltIn: true });
     };
     // (only for films and episodes from the playlist; other sources hand over at once, as before)
-    if (!lang || item.torrentItem || !/^(movie|ep):/.test(resumeKey || '')) { go(''); return; }
+    if (!wantsSub) { go(''); return; }
     handingOver = true;
     toast(`Finding ${langName(lang)} subtitles…`);
     subtitleFor(item).then((subtitle) => { handingOver = false; if (!P.mode) go(subtitle); }, () => { handingOver = false; go(''); });
@@ -344,7 +355,7 @@ function paint() {
       <div class="osd-top"><div class="osd-title"><h1>${esc(it.title)}</h1>${it.sub ? `<p>${esc(it.sub)}</p>` : ''}</div><div class="osd-clock" id="osd-clock">${hhmm(now())}</div></div>
       <div class="osd-bottom vod">
         <div class="scrub"><span class="pp">${icon(P.paused ? 'play' : 'pause')}</span>
-          <span class="t" id="osd-pos">${duration(P.pos / 1000)}</span>${progressBar(P.dur ? P.pos / P.dur : 0, 'scrubbar')}<span class="t" id="osd-dur">${P.dur ? duration(P.dur / 1000) : '--:--'}</span></div>
+          <span class="t" id="osd-pos">${duration(P.pos / 1000)}</span><span class="osd-jump" id="osd-jump" hidden></span>${progressBar(P.dur ? P.pos / P.dur : 0, 'scrubbar')}<span class="t" id="osd-dur">${P.dur ? duration(P.dur / 1000) : '--:--'}</span></div>
         <p class="osd-hint">Left and right skip 10 seconds, hold to skip a minute. ${icon('list')} Menu for subtitles, audio, speed and download.</p>
       </div>
       <div id="player-status" class="pstatus"></div>`;
@@ -453,6 +464,7 @@ async function options() {
   }
   const t = N.tracks();
   opts.push({ label: 'Subtitles', icon: 'subtitles', value: 'subs', hint: t.text.find((x) => x.selected) ? langName((t.text.find((x) => x.selected).lang || '').slice(0, 2)) : 'Off' });
+  opts.push({ label: 'Subtitle size', icon: 'subtitles', value: 'subsize', hint: SUB_SIZE_NAMES[setting('subSize') || 'm'] });
   if (t.audio.length > 1) opts.push({ label: 'Audio language', icon: 'audio', value: 'audio', hint: (t.audio.find((x) => x.selected) || {}).label || '' });
   if (isVod) {
     opts.push({ label: 'Playback speed', icon: 'speed', value: 'speed', hint: P.speed === 1 ? 'Normal' : P.speed + '\u00d7' });
@@ -463,6 +475,7 @@ async function options() {
   opts.push({ label: 'Picture size', icon: 'tv', value: 'resize', hint: { fit: 'Fit to screen', fill: 'Stretch to fill', zoom: 'Zoom and crop' }[setting('resize')] });
   const v = await sheet({ title: isVod ? P.item.title : P.ch.name, options: opts });
   if (!v) return;
+  if (v === 'subsize') { await subtitleSizeMenu(); return; }
   if (v === 'fav') toast(toggleFav('live', P.ch.id) ? 'Added to favourites' : 'Removed from favourites');
   else if (v === 'startover') { const nn = nowNext(P.ch); if (nn && nn.now) playCatchup(P.ch, nn.now); }
   else if (v === 'golive') startLive(P.ch, false);
@@ -495,17 +508,32 @@ function more() {
   else itemActions('live', P.ch, window.__app, { list: P.list });
 }
 
+export const SUB_SIZES = [['xs', 'Very small'], ['s', 'Small'], ['m', 'Medium'], ['l', 'Large'], ['xl', 'Very large']];
+const SUB_SIZE_NAMES = SUB_SIZES.reduce((m, [k, l]) => { m[k] = l; return m; }, {});
+// Pick a size and see it on the picture straight away (a sample line shows if nothing is being said).
+async function subtitleSizeMenu() {
+  const list = (cur) => SUB_SIZES.map(([k, l]) => ({ label: l, value: k, on: cur === k }));
+  const show = () => { const b = subsBox(); b.classList.add('previewing'); return b; };
+  const sample = !show().textContent.trim();
+  if (sample) show().innerHTML = '<span>This is how subtitles will look</span>';
+  const now = setting('subSize') || 'm';
+  await sheet({ title: 'Subtitle size', focusIndex: Math.max(0, SUB_SIZES.findIndex(([k]) => k === now)), options: list(now),
+    onPick: (z) => { setting('subSize', z); show(); return list(z); } });   // stays open: try sizes, Back when happy
+  if (sample) subsBox().innerHTML = '';
+  subsBox().classList.remove('previewing');
+}
+
 async function subtitleMenu() {
   const t = N.tracks();
   const opts = [{ label: 'Off', value: 'off', on: !t.text.some((x) => x.selected) }];
   for (const x of t.text) opts.push({ label: x.label, value: 'id:' + x.id, on: x.selected, icon: 'subtitles', hint: x.external ? 'Downloaded' : 'In the video' });
   if (P.mode === 'vod') {
-    opts.push({ label: 'English · find online', value: 'cat:en', icon: 'search', hint: 'SubtitleCat, no account needed' });
-    opts.push({ label: 'Malayalam · find online', value: 'cat:ml', icon: 'search', hint: 'SubtitleCat: ready-made, or translated for you' });
+    opts.push({ label: 'English', value: 'cat:en', icon: 'search', hint: 'Fetched only when you choose it' });
+    opts.push({ label: 'Malayalam', value: 'cat:ml', icon: 'search', hint: 'Fetched or translated only when you choose it' });
   }
   if (P.mode === 'vod') opts.push({ label: 'Search online · SubDL + OpenSubtitles', value: 'online', icon: 'search', hint: hasKey() ? (setting('subLangs') || []).map(langName).join(', ') : 'Add a subtitle key in Settings' });
   if (P.mode === 'vod') opts.push({ label: 'Search subtitles by title', value: 'search-title', icon: 'search', hint: 'Useful when a filename has release tags or a multi-episode pack' });
-  opts.push({ label: 'Subtitle size', value: 'size', icon: 'subtitles', hint: { s: 'Small', m: 'Medium', l: 'Large' }[setting('subSize') || 'm'] });
+  opts.push({ label: 'Subtitle size', value: 'size', icon: 'subtitles', hint: SUB_SIZE_NAMES[setting('subSize') || 'm'] });
   const v = await sheet({ title: 'Subtitles', options: opts });
   if (!v) return;
   if (v === 'off') { N.selectTrack('text', 'off'); subsBox().innerHTML = ''; return; }
@@ -522,11 +550,7 @@ async function subtitleMenu() {
     return;
   }
   if (v.startsWith('id:')) { N.selectTrack('text', v.slice(3)); return; }
-  if (v === 'size') {
-    const z = await sheet({ title: 'Subtitle size', options: [['s', 'Small'], ['m', 'Medium'], ['l', 'Large']].map(([k, l]) => ({ label: l, value: k, on: setting('subSize') === k })) });
-    if (z) { setting('subSize', z); subsBox(); }
-    return;
-  }
+  if (v === 'size') { await subtitleSizeMenu(); return; }
   if (v === 'online' || v === 'search-title') {
     if (!hasKey()) { toast('Add a SubDL or OpenSubtitles key in Settings > Subtitles.', 'err'); return; }
     let query = subItem(P.item);
@@ -604,13 +628,33 @@ function nextCountdown() {
   P.nextBox = box;
 }
 
-let seekAcc = 0, seekTimer = null;
-function seek(ms) {
-  seekAcc += ms;
-  P.pos = Math.max(0, Math.min(P.dur || Infinity, P.pos + ms));
+// Seeking like VLC: one press jumps 10 s at once; holding the button speeds up the longer it is
+// held (10 s, then 30 s, 1 min, 3 min per step). While held only the clock on screen moves; the
+// film itself jumps once, when the button is released.
+let seekAcc = 0, seekTimer = null, holdSince = 0;
+const SEEK_STEPS = [[0, 10000], [900, 30000], [2200, 60000], [4500, 180000]];
+function seekStep(e) {
+  const t = performance.now();
+  if (!(e && e.repeat)) { holdSince = t; return 10000; }
+  const held = t - holdSince;
+  let step = 10000;
+  for (const [after, ms] of SEEK_STEPS) if (held >= after) step = ms;
+  return step;
+}
+function seek(ms, held = false) {
+  const before = P.pos;
+  P.pos = Math.max(0, Math.min(P.dur > 0 ? P.dur - 3000 : Infinity, P.pos + ms));
+  seekAcc += P.pos - before;
   paintProgress(); showOsd();
+  const jump = root().querySelector('#osd-jump');
+  if (jump) { jump.textContent = `${seekAcc < 0 ? '\u2212' : '+'}${duration(Math.abs(seekAcc) / 1000)}`; jump.hidden = false; }
   clearTimeout(seekTimer);
-  seekTimer = setTimeout(() => { N.seekBy(seekAcc); seekAcc = 0; }, 350);
+  // a single press goes at once; during a hold wait for the release (repeats arrive ~every 0.1 s)
+  seekTimer = setTimeout(() => {
+    if (seekAcc) N.seekBy(seekAcc);
+    seekAcc = 0;
+    const j = root().querySelector('#osd-jump'); if (j) j.hidden = true;
+  }, held ? 260 : 90);
 }
 
 function onKey(k, e) {
@@ -648,8 +692,8 @@ function onKey(k, e) {
     P.paused = k === 'play' ? false : k === 'pause' ? true : !P.paused;
     N.pause(P.paused); paint(); showOsd(P.paused ? 1e9 : 4000); return true;
   }
-  if (k === 'left' || k === 'rew') { seek(e && e.repeat ? -60000 : -10000); return true; }
-  if (k === 'right' || k === 'ffwd') { seek(e && e.repeat ? 60000 : 10000); return true; }
+  if (k === 'left' || k === 'rew') { seek(-seekStep(e), !!(e && e.repeat)); return true; }
+  if (k === 'right' || k === 'ffwd') { seek(seekStep(e), !!(e && e.repeat)); return true; }
   if (k === 'up' || k === 'down') { showOsd(); return true; }
   return true;
 }
