@@ -1,7 +1,7 @@
 // Online subtitles from OpenSubtitles.com: search by exact file hash (perfect sync) and by title,
 // pick the preferred language automatically, or let the viewer choose.
 import * as N from './native.js';
-import { setting } from './store.js';
+import { setting, S, set } from './store.js';
 import { LANGS } from './languages.js';
 
 const API = 'https://api.opensubtitles.com/api/v1';
@@ -300,7 +300,7 @@ export function findSubtitle(item, lang = 'en', { onProgress } = {}) {
   if (!job) {
     job = { listeners: new Set(), pct: -1 };
     job.promise = lookup(item, lang, (pct) => { job.pct = pct; job.listeners.forEach((fn) => fn(pct)); })
-      .then((r) => { if (!r) setTimeout(() => jobs.delete(key), 60000); else jobs.delete(key); return r; },
+      .then((r) => { if (!r && !failures.get(key)) setTimeout(() => jobs.delete(key), 60000); else jobs.delete(key); return r; },
         (e) => { jobs.delete(key); throw e; });
     jobs.set(key, job);
   }
@@ -308,11 +308,18 @@ export function findSubtitle(item, lang = 'en', { onProgress } = {}) {
   return job.promise;
 }
 const srtText = (url) => N.call('GET', url, BROWSER);
+// Why the last search for a title came back empty: 'offline' (the site could not be reached),
+// 'translate' (translation failed) or '' (searched fine, nothing matched).
+const failures = new Map();
+export const subtitleFailure = (item, lang) => failures.get(subtitleIdentity(item, lang)) || '';
 async function lookup(item, lang, progress) {
   const dur = +item.durSecs || 0;
-  const key = fileKey({ source: 'SubtitleCat', url: `${subtitleIdentity(item, lang)}` });
+  const id = subtitleIdentity(item, lang);
+  const key = fileKey({ source: 'SubtitleCat', url: id });
+  failures.delete(id);
   try {
-    const pages = await catPages(subtitleTarget(item));
+    let pages;
+    try { pages = await catPages(subtitleTarget(item)); } catch (e) { failures.set(id, 'offline'); throw e; }
     // 1. a file already in this language
     for (const x of pages) {
       const link = subtitleCatLink(x.detail, lang);
@@ -329,7 +336,8 @@ async function lookup(item, lang, progress) {
         const text = await srtText(orig).catch(() => '');
         if (!fitsVideo(text, dur)) continue;
         progress(0);
-        const translated = await translateSrt(text, lang, progress);
+        let translated;
+        try { translated = await translateSrt(text, lang, progress); } catch (e) { failures.set(id, 'translate'); throw e; }
         const uri = N.saveSubtitle(key, translated);
         if (uri) { N.cacheWrite?.(subtitleIdentity(item, lang), key); return { uri, lang, source: 'SubtitleCat, translated' }; }
       }
@@ -379,18 +387,23 @@ export async function subtitleLink(result) {
 // otherwise fetch the best online match when auto subtitles are on.
 export async function autoSubs(item, notify, prefetched = null, stillCurrent = () => true) {
   if (!stillCurrent()) return;
-  const langs = setting('subLangs') || [];
+  // item.lang: the language chosen for this title ('' = none); otherwise the order in Settings
+  if (item.lang === '') return;
+  const langs = item.lang ? [item.lang] : (setting('subLangs') || []);
   const t = N.tracks();
   const embedded = t.text.find((x) => langs.includes((x.lang || '').slice(0, 2)));
   if (embedded) { N.selectTrack('text', embedded.id); notify && notify(`Subtitles: ${langName(embedded.lang.slice(0, 2))}`); return; }
-  if (!setting('subAuto')) return;
-  // the first preferred language, from the saved copy, SubtitleCat or SubDL
+  if (!item.lang && !setting('subAuto')) return;
+  // the first preferred language, from the saved copy, SubtitleCat (ready or translated here) or SubDL
   const first = langs[0] || 'en';
-  const found = await findSubtitle(item, first);
+  let step = -1;
+  const found = await findSubtitle(item, first, { onProgress: (pct) => {
+    const s = Math.floor(pct / 34); if (s !== step && stillCurrent()) { step = s; notify && notify(`Translating subtitles to ${langName(first)}… ${pct}%`); } } }).catch(() => null);
   if (found) {
     if (stillCurrent()) { N.loadSubtitle(found.uri, found.lang, found.source); notify && notify(`Subtitles: ${langName(found.lang)}`); }
     return;
   }
+  if (item.lang) { if (stillCurrent() && notify) notify(subtitleFailure(item, first) === 'offline' ? 'Couldn\u2019t reach the subtitle site' : `No ${langName(first)} subtitles found for this title`); return; }
   if (!hasAutoProvider()) return;
   try {
     const r = await (prefetched || searchSubs(item, langs, { automatic: true }));
@@ -410,4 +423,15 @@ export function setSubtitleLanguage(lang) {
   const rest = (setting('subLangs') || []).filter((x) => x !== lang);
   setting('subLangs', [lang, ...rest]);
   setting('subAuto', true);
+}
+
+// ---------- the language chosen for one film or series (Settings holds the default) ----------
+// key: 'movie:<id>' or 'series:<id>'. Returns 'en' / 'ml' / '' (none), or undefined when never chosen.
+export function titleSubLang(key) { const m = S.subChoice || {}; return key && key in m ? m[key] : undefined; }
+export function setTitleSubLang(key, lang) {
+  const m = { ...(S.subChoice || {}) };
+  if (lang === subtitleLanguage()) delete m[key]; else m[key] = lang;
+  const keys = Object.keys(m);
+  if (keys.length > 400) for (const k of keys.slice(0, keys.length - 300)) delete m[k];
+  set('subChoice', m);
 }

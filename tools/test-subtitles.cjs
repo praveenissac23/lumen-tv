@@ -37,7 +37,7 @@ const mocks = {
     cacheWrite() {}, cacheRead: () => '', cachedSubtitle: () => '',
     tracks: () => ({ text: [] }), selectTrack() {},
   },
-  './store.js': { setting: (key) => settings[key] },
+  './store.js': { setting: (key) => settings[key], S: {}, set() {} },
   './languages.js': { LANGS: [] },
 };
 (async () => {

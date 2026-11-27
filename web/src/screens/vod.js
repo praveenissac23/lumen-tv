@@ -8,8 +8,7 @@ import { playVod } from '../player.js';
 import { langCatEntries } from '../languages.js';
 import { itemActions, download } from '../actions.js';
 import { playTrailer, trailerCandidates } from '../trailer.js';
-import { subtitleLanguage, setSubtitleLanguage, langName, findSubtitle } from '../subs.js';
-import { sheet } from '../ui.js';
+import { subtitleLanguage, langName, findSubtitle, titleSubLang, setTitleSubLang, subtitleFailure } from '../subs.js';
 
 const SORTS = [['added', 'Recently added'], ['name', 'A to Z'], ['rating', 'Top rated'], ['year', 'Newest']];
 
@@ -127,10 +126,10 @@ export class DetailScreen {
     this.infoP = this.kind === 'movie'
       ? vodInfo(this.item.id).then((i) => { if (i) this.fill(i); return i; }).catch(() => null).then((i) => {
         this.durSecs = (i && i.durSecs) || 0;
-        if (subtitleLanguage()) findSubtitle(this.subQuery(), subtitleLanguage()).catch(() => {});
+        this.checkSubs();
         return i;
       })
-      : seriesInfo(this.item.id).then((i) => { this.info = i; this.fill(i); this.paintSeasons(); return i; }).catch(() => { this.paintSeasons(); return null; });
+      : seriesInfo(this.item.id).then((i) => { this.info = i; this.fill(i); this.paintSeasons(); this.checkSubs(); return i; }).catch(() => { this.paintSeasons(); return null; });
   }
 
   render() {
@@ -151,10 +150,14 @@ export class DetailScreen {
               ? `<button class="f btn primary" data-a="resume">${icon('play')}Resume from ${duration(pr.pos / 1000)}</button><button class="f btn" data-a="play">${icon('history')}Start from the beginning</button>`
               : `<button class="f btn primary" data-a="play">${icon('play')}Play</button>`) : `<button class="f btn primary" data-a="next">${icon('play')}<span id="dt-nextlabel">Play</span></button>`}
             <button class="f btn trailer-btn" data-a="trailer">${icon('film')}Trailer</button>
-            <button class="f btn" data-a="sublang">${icon('subtitles')}<span id="dt-sublang">${subtitleLanguage() ? langName(subtitleLanguage()) : 'No'} subtitles</span></button>
             ${this.kind === 'movie' ? `<button class="f btn" data-a="download">${icon('download')}Download</button>` : ''}
             <button class="f btn icon-only" data-a="fav" aria-label="Favourite">${icon(isFav(this.kind, it.id) ? 'heartFill' : 'heart')}</button>
             ${this.kind === 'movie' ? `<button class="f btn icon-only" data-a="more" aria-label="More">${icon('more')}</button>` : ''}
+          </div>
+          <div class="dt-subs" data-group="subs">
+            <span class="dt-subs-label">${icon('subtitles')}Subtitles</span>
+            ${[['en', 'English'], ['ml', 'Malayalam'], ['', 'Off']].map(([v, l]) => `<button class="f chip dt-sub" data-sub="${v}">${icon('check')}${l}</button>`).join('')}
+            <span class="dt-subs-status" id="dt-subs-status"></span>
           </div>
           ${pr ? `<div class="dt-progress">${progressBar(pr.pos / pr.dur)}<small>${Math.round((pr.dur - pr.pos) / 60000)} min left</small></div>` : ''}
         </div>
@@ -164,6 +167,13 @@ export class DetailScreen {
       const b = e.target.closest('[data-a]');
       if (b) this.action(b.dataset.a);
     });
+    this.view.querySelector('.dt-subs').addEventListener('click', (e) => {
+      const b = e.target.closest('[data-sub]');
+      if (!b) return;
+      setTitleSubLang(this.subKey(), b.dataset.sub);
+      this.checkSubs();
+    });
+    this.checkSubs();
   }
 
   fill(i) {
@@ -224,7 +234,35 @@ export class DetailScreen {
     this.epList.setItems(eps, 0);
   }
 
-  subQuery() { return { title: this.item.name, year: this.item.year, durSecs: this.durSecs || 0 }; }
+  // ---------- subtitles for this title: pick a language, see whether it is ready ----------
+  subKey() { return this.kind + ':' + this.item.id; }
+  subLang() { const c = titleSubLang(this.subKey()); return c !== undefined ? c : subtitleLanguage(); }
+  // what Play will start: the film, or the next episode of the series
+  subQuery() {
+    if (this.kind === 'movie') return { title: this.item.name, year: this.item.year, durSecs: this.durSecs || 0 };
+    const n = this.nextEpisode();
+    return n ? { title: this.item.name, season: +n.season, episode: n.ep.num, durSecs: 0 } : null;
+  }
+  checkSubs() {
+    const lang = this.subLang();
+    const row = this.view.querySelector('.dt-subs'), st = this.view.querySelector('#dt-subs-status');
+    if (!row) return;
+    for (const b of row.querySelectorAll('[data-sub]')) b.classList.toggle('on', b.dataset.sub === lang);
+    const token = this.subToken = {};
+    const say = (cls, text) => { if (this.subToken === token && !this.dead) { st.className = 'dt-subs-status ' + cls; st.textContent = text; } };
+    if (!lang) { say('', 'Plays without subtitles'); return; }
+    const q = this.subQuery();
+    if (!q || (this.kind === 'movie' && this.durSecs === undefined)) { say('busy', 'Checking…'); return; }   // asked again once details load
+    const what = this.kind === 'series' ? ` for S${q.season} E${q.episode}` : '';
+    say('busy', `Looking for ${langName(lang)} subtitles${what}…`);
+    findSubtitle(q, lang, { onProgress: (pct) => say('busy', pct < 100 ? `Translating to ${langName(lang)}… ${pct}%` : 'Saving…') })
+      .then((f) => {
+        if (f) say('ok', `\u2713 ${langName(lang)} subtitles ready${what}${/translated/.test(f.source) ? ' (translated)' : ''}. Press Play.`);
+        else say('err', subtitleFailure(q, lang) === 'offline' ? 'Couldn\u2019t reach the subtitle site. Check the internet and pick the language again.'
+          : subtitleFailure(q, lang) === 'translate' ? 'Translation didn\u2019t finish. Pick Malayalam again to retry.'
+          : `No ${langName(lang)} subtitles found${what}. It will play without them.`);
+      }, () => say('err', 'Couldn\u2019t reach the subtitle site. Check the internet and pick the language again.'));
+  }
   epItem(season, ep) {
     const it = this.item;
     return { title: it.name, sub: `Season ${season}, episode ${ep.num}: ${ep.title}`, url: episodeUrl(ep), poster: it.img, ext: ep.ext,
@@ -242,7 +280,7 @@ export class DetailScreen {
     return out.slice(0, 30);
   }
   playEp(ep) {
-    playVod(this.epItem(this.season, ep), 'ep:' + ep.id, () => this.app.reload(), this.queueAfter(this.season, ep));
+    playVod({ ...this.epItem(this.season, ep), subLang: this.subLang() }, 'ep:' + ep.id, () => this.app.reload(), this.queueAfter(this.season, ep));
   }
 
   async action(a) {
@@ -251,29 +289,12 @@ export class DetailScreen {
     if (a === 'play' || a === 'resume') {
       const key = 'movie:' + it.id;
       if (a === 'play') { const p = progressOf(key); if (p) p.pos = 0; }
-      playVod({ title: it.name, sub: it.year ? String(it.year) : '', url: movieUrl(it), poster: it.img, ext: it.ext, kind: 'movie', id: it.id, year: it.year, durSecs: this.durSecs || 0 }, key, () => this.app.reload());
+      playVod({ title: it.name, sub: it.year ? String(it.year) : '', url: movieUrl(it), poster: it.img, ext: it.ext, kind: 'movie', id: it.id, year: it.year, durSecs: this.durSecs || 0, subLang: this.subLang() }, key, () => this.app.reload());
     } else if (a === 'next') {
       const n = this.nextEpisode();
       if (!n) { toast('Episodes are still loading'); return; }
       this.season = n.season;
       this.playEp(n.ep);
-    } else if (a === 'sublang') {
-      const cur = subtitleLanguage();
-      const v = await sheet({ title: 'Subtitles for films and series', options: [
-        { label: 'English', value: 'en', on: cur === 'en', icon: 'subtitles', hint: 'Found when you press Play' },
-        { label: 'Malayalam', value: 'ml', on: cur === 'ml', icon: 'subtitles', hint: 'Ready-made, or translated for you' },
-        { label: 'No subtitles', value: 'off', on: !cur, icon: 'eyeOff' },
-      ] });
-      if (!v) return;
-      setSubtitleLanguage(v === 'off' ? '' : v);
-      const lab = this.view.querySelector('#dt-sublang');
-      if (lab) lab.textContent = `${v === 'off' ? 'No' : langName(v)} subtitles`;
-      // fetch it now, so Play starts with the subtitle already on this device
-      if (v !== 'off' && this.kind === 'movie') {
-        let told = false;
-        findSubtitle(this.subQuery(), v, { onProgress: (pct) => { if (!told || pct === 100) { told = true; toast(pct === 100 ? `${langName(v)} subtitles are ready` : `Translating subtitles to ${langName(v)} in the background…`); } } })
-          .then((f) => { if (!f) toast(`No ${langName(v)} subtitles found for this title`); }).catch(() => {});
-      }
     } else if (a === 'download') {
       download('movie', it);
     } else if (a === 'more') {

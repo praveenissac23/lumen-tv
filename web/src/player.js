@@ -5,7 +5,7 @@ import { S, set, setting, pushRecentLive, pushRecentVod, saveProgress, progressO
 import { $, esc, hhmm, duration, minutesLeft, now, el } from './util.js';
 import { pushLayer, popLayer, focus } from './nav.js';
 import { icon, logo, progressBar, toast, sheet, form, VList, nowSlot, patchNowSlots } from './ui.js';
-import { autoSubs, searchSubs, loadOnline, hasKey, hasAutoProvider, langName, SUB_LANGS, findSubtitle, subtitleLanguage } from './subs.js';
+import { autoSubs, searchSubs, loadOnline, hasKey, hasAutoProvider, langName, SUB_LANGS, findSubtitle, subtitleLanguage, titleSubLang, subtitleFailure } from './subs.js';
 import { itemActions, download } from './actions.js';
 import { bgHole } from './look.js';
 
@@ -53,7 +53,7 @@ N.on('player', (d) => {
       P.subsTried = true;
       const it = P.item;
       const prefetched = P.subsPromise;
-      setTimeout(() => { if (P.item === it) autoSubs({ ...subItem(it), durSecs: it.durSecs || (P.dur > 0 ? Math.round(P.dur / 1000) : 0) }, (m) => toast(m), prefetched,
+      setTimeout(() => { if (P.item === it) autoSubs({ ...subItem(it), durSecs: it.durSecs || (P.dur > 0 ? Math.round(P.dur / 1000) : 0), lang: it.subLang }, (m) => toast(m), prefetched,
         () => P.mode === 'vod' && P.item === it); }, 1200);
     }
   }
@@ -210,7 +210,7 @@ async function subtitleFor(item) {
   skipWait = null;
   if (state === 'skip') toast('Playing without subtitles');
   else if (state === 'wait') { state = 'late'; toast(`${langName(lang)} subtitles are taking too long. Playing without them; they will be ready next time.`); }
-  else if (!found) toast(`No ${langName(lang)} subtitles found for this title`);
+  else if (!found) toast(subtitleFailure(subItem(item), lang) === 'offline' ? 'Couldn\u2019t reach the subtitle site. Playing without subtitles.' : `No ${langName(lang)} subtitles found for this title`);
   // only a file saved on this device can be passed to another app
   return found && /^content:/.test(found.uri) ? found.uri : '';
 }
@@ -245,6 +245,11 @@ export function playCatchup(ch, prog, list, onExit) {
 
 // item: {title, url, poster, kind, id, sub}
 export function playVod(item, resumeKey, onExit, queue, { forceBuiltIn = false, playerPkg = null, subtitle = '' } = {}) {
+  // the subtitle language for this title: chosen on its page, else the default from Settings
+  if (item.subLang == null && /^(movie|ep):/.test(resumeKey || '') && !item.torrentItem) {
+    const chosen = titleSubLang(resumeKey.startsWith('movie:') ? resumeKey : item.seriesId ? 'series:' + item.seriesId : '');
+    item = { ...item, subLang: chosen !== undefined ? chosen : subtitleLanguage() };
+  }
   const section = item.kind === 'episode' || (resumeKey && resumeKey.startsWith('ep:')) ? 'series' : 'movie';
   const saved = resumeKey && progressOf(resumeKey);
   const title = item.sub && section === 'series' ? `${item.title} – ${item.sub}` : item.title;
