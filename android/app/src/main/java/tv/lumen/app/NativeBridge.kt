@@ -342,6 +342,32 @@ class NativeBridge(private val act: MainActivity) {
     }
 
     /** Hands a link to another app. pkg "" shows Android's app chooser. */
+
+    /** Copies a subtitle to shared storage and returns the path VLC can open, or null. */
+    private fun vlcSubtitlePath(src: File): String? = try {
+        require(src.isFile && src.length() in 20..5_000_000)
+        val name = "Lumen-" + src.nameWithoutExtension.takeLast(20) + ".srt"
+        if (Build.VERSION.SDK_INT >= 30) {
+            // Android 11+: other apps cannot see Android/data, so the copy goes to Download/Lumen
+            val resolver = act.contentResolver
+            val downloads = android.provider.MediaStore.Downloads.getContentUri(android.provider.MediaStore.VOLUME_EXTERNAL_PRIMARY)
+            val cols = android.provider.MediaStore.MediaColumns
+            runCatching { resolver.delete(downloads, "${cols.DISPLAY_NAME}=?", arrayOf(name)) }
+            val row = resolver.insert(downloads, android.content.ContentValues().apply {
+                put(cols.DISPLAY_NAME, name); put(cols.MIME_TYPE, "application/x-subrip"); put(cols.RELATIVE_PATH, "Download/Lumen")
+            }) ?: error("No place for the subtitle")
+            resolver.openOutputStream(row)?.use { out -> src.inputStream().use { it.copyTo(out) } } ?: error("Cannot write the subtitle")
+            resolver.query(row, arrayOf(cols.DATA), null, null, null)?.use { c -> if (c.moveToFirst()) c.getString(0) else null }
+                ?: File(android.os.Environment.getExternalStoragePublicDirectory(android.os.Environment.DIRECTORY_DOWNLOADS), "Lumen/$name").absolutePath
+        } else {
+            val dir = File(act.getExternalFilesDir(null) ?: error("No shared storage"), "subs").apply { mkdirs() }
+            dir.listFiles()?.filter { System.currentTimeMillis() - it.lastModified() > 7 * 86400000L }?.forEach { it.delete() }
+            val out = File(dir, name)
+            src.copyTo(out, overwrite = true)
+            out.absolutePath
+        }
+    } catch (e: Exception) { android.util.Log.w("LumenSubtitle", "copy for VLC failed: ${e.message}"); null }
+
     @JavascriptInterface
     fun openWith(pkg: String, url: String, optsJson: String): Boolean {
         val o = JSONObject(optsJson)
@@ -352,18 +378,24 @@ class NativeBridge(private val act: MainActivity) {
         val uri = Uri.parse(url)
         val subtitleUri = o.optString("subtitle").takeIf { it.isNotBlank() }?.let { Uri.parse(it) }
             ?.takeIf { it.scheme == "content" && it.authority == "${act.packageName}.files" }
-        val vlcSubtitleUrl = if (pkg == "org.videolan.vlc" && subtitleUri != null) {
+        // VLC treats "subtitles_location" as a file path that it opens itself (a link or an app-private
+        // content URI is never read), so VLC gets a copy of the subtitle on shared storage.
+        val vlcSubtitleUrl = if (pkg.startsWith("org.videolan") && subtitleUri != null) {
             val segments = subtitleUri.pathSegments
             val name = segments.getOrNull(1)
             if (segments.size == 2 && segments[0] in listOf("subtitles", "saved-subtitles") && name != null &&
                 Regex("^[A-Za-z0-9._-]+\\.srt$", RegexOption.IGNORE_CASE).matches(name)) {
                 val dir = if (segments[0] == "saved-subtitles") File(act.filesDir, "subtitles") else File(act.cacheDir, "subs")
-                runCatching { act.server.publishSubtitle(File(dir, name)) }.getOrNull()
+                vlcSubtitlePath(File(dir, name))
             }
             else null
         } else null
-        if (pkg == "org.videolan.vlc" && subtitleUri != null)
-            android.util.Log.i("LumenSubtitle", "handoff published=${vlcSubtitleUrl != null}; path=${subtitleUri.pathSegments.firstOrNull()}")
+        if (pkg.startsWith("org.videolan") && subtitleUri != null) {
+            android.util.Log.i("LumenSubtitle", "handoff file=${vlcSubtitleUrl != null}; path=${subtitleUri.pathSegments.firstOrNull()}")
+            val canRead = Build.VERSION.SDK_INT >= 30 || act.packageManager.checkPermission(android.Manifest.permission.READ_EXTERNAL_STORAGE, pkg) == PackageManager.PERMISSION_GRANTED
+            if (vlcSubtitleUrl == null) emit("toast", JSONObject().put("text", "Couldn\u2019t prepare the subtitle file for VLC"))
+            else if (!canRead) emit("toast", JSONObject().put("text", "VLC needs file access to show subtitles: Settings > Applications > VLC > Permissions > Storage"))
+        }
         val pm = act.packageManager
         fun base(type: String?): Intent = Intent(Intent.ACTION_VIEW).apply {
             if (type != null) setDataAndType(uri, type) else data = uri

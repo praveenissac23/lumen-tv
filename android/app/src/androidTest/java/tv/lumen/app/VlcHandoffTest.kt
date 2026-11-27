@@ -111,8 +111,9 @@ class VlcHandoffTest {
                 waitFor("VLC did not play with the supplied subtitle",30000){dismissVlcTips();vlcPlaying()}
                 settleVlc()
                 Thread.sleep(1600);screenshot("vlc-subtitle-video.png")
+                // The subtitle is checked where it matters: tools/test-android-vlc.sh reads the words off this screenshot.
                 val subtitleLog = shell("logcat -d -s LumenSubtitle:I")
-                assertTrue("Installed VLC never requested the hosted subtitle; $subtitleLog", subtitleLog.contains("served SRT to VLC"))
+                assertTrue("Lumen did not hand VLC a subtitle file; $subtitleLog", subtitleLog.contains("handoff file=true"))
                 shell("am force-stop org.videolan.vlc")
                 shell("am start -n tv.lumen.app/.MainActivity")
                 waitFor("Lumen did not reopen after subtitle test"){shell("dumpsys activity activities").lineSequence().any{it.contains("mResumedActivity")&&it.contains("tv.lumen.app")}}
