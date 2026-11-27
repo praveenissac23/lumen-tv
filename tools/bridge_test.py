@@ -31,6 +31,7 @@ SIG = {
     'seekBy': ['number'], 'seekTo': ['number'], 'setRect': ['string'], 'setResize': ['string'], 'setBuffer': ['number'],
     'apps': [], 'openWith': ['string', 'string', 'string'], 'copy': ['string'], 'openUrl': ['string'], 'head': ['number', 'string'],
     'call': ['number', 'string', 'string', 'string', 'string'], 'subtitleHash': ['number', 'string'], 'loadSubtitle': ['string', 'string', 'string'],
+    'prepareSubtitle': ['number', 'string', 'string'], 'cachedSubtitle': ['string'],
     'tracks': [], 'installUpdate': ['string'], 'installUpdateWith': ['string', 'string'], 'selectTrack': ['string', 'string'], 'setSpeed': ['number'], 'companion': [], 'showKeyboard': [], 'textInput': ['string', 'string', 'string'],
 }
 MOCK = """
@@ -40,12 +41,15 @@ MOCK = """
   const impl = {
     deviceInfo: () => JSON.stringify({fireTv: true, voice: true, model: 'Amazon AFTKA', version: '1.0'}),
     apps: () => JSON.stringify([{pkg: 'com.dv.adm', name: 'ADM', role: 'download'}, {pkg: 'org.videolan.vlc', name: 'VLC', role: 'player'}]),
-    openWith: () => true,
+    openWith: (pkg, url, opts) => { window.__lastOpen = opts; return true; },
     head: (id, url) => fire('head', {id, ok: true, size: 1234567890, type: 'video/mp4'}),
     tracks: () => JSON.stringify({audio: [{id: '0:0', label: 'Malayalam', lang: 'ml', selected: true}, {id: '0:1', label: 'Tamil', lang: 'ta', selected: false}], text: []}),
     companion: () => JSON.stringify({url: 'http://192.168.1.5:8899', pin: '1234'}),
     subtitleHash: (id) => fire('head', {id, ok: true, hash: '8e245d9679d31e12', size: 1234567890}),
-    call: (id, m, url) => { bodies[id] = url.includes('/download') ? JSON.stringify({link: 'https://example.com/x.srt'}) : JSON.stringify({data: [{attributes: {language: 'en', release: 'Demo.Release', download_count: 10, moviehash_match: true, files: [{file_id: 42}]}}]}); fire('call', {id, ok: true}); },
+    cachedSubtitle: () => '',
+    prepareSubtitle: (id, url, key) => { window.__subUrl = url; bodies[id] = 'content://tv.lumen.app.files/saved-subtitles/abc.srt'; fire('call', {id, ok: true}); },
+    call: (id, m, url) => { bodies[id] = url.includes('subtitlecat.com/index.php') ? '<a href="https://www.subtitlecat.com/subs/77/' + decodeURIComponent(url.split('search=')[1]).replace(/ /g, '.') + '.1080p.html">x</a>'
+      : url.includes('subtitlecat.com/subs/') ? '<a href="/subs/78/Film-en.srt">Download</a>' : url.includes('/download') ? JSON.stringify({link: 'https://example.com/x.srt'}) : JSON.stringify({data: [{attributes: {language: 'en', release: 'Demo.Release', download_count: 10, moviehash_match: true, files: [{file_id: 42}]}}]}); fire('call', {id, ok: true}); },
     http: (id, url, t) => { fetch(url).then(r => r.ok ? r.text() : Promise.reject(r.status)).then(b => { bodies[id] = b; fire('http', {id, ok: true}); }, e => fire('http', {id, ok: false, error: 'HTTP ' + e})); },
     take: (id) => { const b = bodies[id]; delete bodies[id]; return b; },
     viewSize: () => JSON.stringify({w: innerWidth, h: innerHeight}),
@@ -132,9 +136,11 @@ with sync_playwright() as p:
     page.evaluate("document.querySelector('[data-act=defplayer][data-arg=playerMovie]').click()"); page.wait_for_timeout(300)
     page.evaluate("[...document.querySelectorAll('.sheet-item')].find(b => b.textContent.includes('VLC')).click()"); page.wait_for_timeout(300)
     page.evaluate("__app.go('detail', {kind:'movie', id: __C.movie[1].id})"); page.wait_for_timeout(400)
-    page.evaluate("document.querySelector('[data-a=play]').click()"); page.wait_for_timeout(400)
+    page.evaluate("document.querySelector('[data-a=play]').click()"); page.wait_for_timeout(900)
     oc = [c for c in page.evaluate('window.__calls') if c['name'] == 'openWith'][n0:]
     print('default player VLC for films ->', [c['args'][0] for c in oc], '| in-app player opened:', page.evaluate("document.body.classList.contains('playing')"))
+    import json as _j
+    print('  subtitle sent with the film:', _j.loads(page.evaluate("window.__lastOpen")).get('subtitle'), '| fetched from:', page.evaluate("window.__subUrl"))
     page.evaluate("__app.go('home', {}, {root:true})"); page.wait_for_timeout(300)
     n1 = len([c for c in page.evaluate('window.__calls') if c['name'] == 'textInput'])
     page.evaluate("document.querySelector('#home-search').click()"); page.wait_for_timeout(600)

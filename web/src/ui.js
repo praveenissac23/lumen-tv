@@ -418,6 +418,7 @@ export class VGrid {
   setItems(items, index = 0) {
     this.items = items; this.index = Math.min(index, Math.max(0, items.length - 1));
     this.track.style.height = Math.ceil(items.length / this.cols) * this.cellH + 'px';
+    this.cells = null;   // new list: build afresh
     this.topRow = -1; this.ensure(true);
   }
   get rowsVisible() { return Math.min(Math.ceil(1080 / this.cellH) + 1, Math.ceil(this.host.offsetHeight / this.cellH)); }
@@ -447,18 +448,40 @@ export class VGrid {
     this.track.style.transform = `translate3d(0,${-top * this.cellH}px,0)`;
     this.paint();
   }
+  refresh() { this.cells = null; this.paint(); }
+  // Only the rows that scroll in are built and only the rows that scroll out are removed; the
+  // tiles that stay keep their element (and their loaded picture), so moving never redraws the grid.
   paint() {
     const from = Math.max(0, (this.topRow - 1) * this.cols);
     const to = Math.min(this.items.length, (this.topRow + this.rowsVisible + 2) * this.cols);
     const had = document.activeElement && this.track.contains(document.activeElement);
     const w = 100 / this.cols;
-    let html = '';
-    for (let i = from; i < to; i++) {
+    const cell = (i) => {
       const r = Math.floor(i / this.cols), c = i % this.cols;
-      html += `<div class="vcell" style="top:${r * this.cellH}px;left:${c * w}%;width:${w}%;height:${this.cellH}px">${this.render(this.items[i], i).replace('class="f', `data-vi="${i}" class="f`)}</div>`;
+      return `<div class="vcell" data-cell="${i}" style="top:${r * this.cellH}px;left:${c * w}%;width:${w}%;height:${this.cellH}px">${this.render(this.items[i], i).replace('class="f', `data-vi="${i}" class="f`)}</div>`;
+    };
+    if (!this.cells) {
+      let html = '';
+      for (let i = from; i < to; i++) html += cell(i);
+      this.track.innerHTML = html;
+      this.cells = new Map();
+      for (const el of this.track.children) this.cells.set(+el.dataset.cell, el);
+      if (had) this.focusIndex(this.index, true);
+      return;
     }
-    this.track.innerHTML = html;
-    if (had) this.focusIndex(this.index, true);
+    let lostFocus = false;
+    for (const [i, el] of this.cells) {
+      if (i < from || i >= to) { if (had && el.contains(document.activeElement)) lostFocus = true; el.remove(); this.cells.delete(i); }
+    }
+    let html = '';
+    const added = [];
+    for (let i = from; i < to; i++) if (!this.cells.has(i)) { html += cell(i); added.push(i); }
+    if (html) {
+      this.track.insertAdjacentHTML('beforeend', html);
+      const kids = this.track.children;
+      for (let k = 0; k < added.length; k++) this.cells.set(added[k], kids[kids.length - added.length + k]);
+    }
+    if (lostFocus) this.focusIndex(this.index, true);
   }
   focusIndex(i, silent) {
     this.index = Math.max(0, Math.min(i, this.items.length - 1));

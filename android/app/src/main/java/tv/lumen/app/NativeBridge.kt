@@ -676,8 +676,12 @@ class NativeBridge(private val act: MainActivity) {
                 val file = permanent ?: File(dir, "external-${System.currentTimeMillis()}-$id.$ext")
                 val temp = File(dir, "pending-${System.currentTimeMillis()}-$id.srt")
                 try {
-                    Net.download(url, temp)
+                    // subtitle sites answer browsers; a player user agent can get a block page instead
+                    Net.download(url, temp, mapOf("User-Agent" to "Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/124.0.0.0 Safari/537.36"))
                     require(temp.length() in 20..5_000_000) { "Subtitle file is empty or too large" }
+                    // an error or block page saved as .srt would show nothing and be reused forever
+                    val head = temp.inputStream().use { input -> val b = ByteArray(4096); val n = input.read(b); if (n > 0) String(b, 0, n, Charsets.ISO_8859_1) else "" }
+                    require(head.contains("-->") && !head.trimStart().startsWith("<")) { "That was not a subtitle file" }
                     if (!temp.renameTo(file)) {
                         temp.copyTo(file, overwrite = true)
                         temp.delete()

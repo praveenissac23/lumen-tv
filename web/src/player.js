@@ -5,7 +5,7 @@ import { S, set, setting, pushRecentLive, pushRecentVod, saveProgress, progressO
 import { $, esc, hhmm, duration, minutesLeft, now, el } from './util.js';
 import { pushLayer, popLayer, focus } from './nav.js';
 import { icon, logo, progressBar, toast, sheet, form, VList, nowSlot, patchNowSlots } from './ui.js';
-import { autoSubs, searchSubs, loadOnline, hasKey, hasAutoProvider, langName, SUB_LANGS } from './subs.js';
+import { autoSubs, searchSubs, loadOnline, hasKey, hasAutoProvider, langName, SUB_LANGS, findSubtitle, subtitleLanguage } from './subs.js';
 import { itemActions, download } from './actions.js';
 import { bgHole } from './look.js';
 
@@ -93,7 +93,13 @@ function subsBox() {
   b.className = 'subs size-' + (setting('subSize') || 'm');
   return b;
 }
-const subItem = (it) => ({ title: it.seriesName || it.title, year: it.year, season: it.season, episode: it.episode, url: it.url });
+// What the subtitle search needs; items resumed from Home only carry the "Season 2, episode 5" / year line.
+function subItem(it) {
+  const sub = String(it.sub || '');
+  const ep = /season\s*(\d+)\D+episode\s*(\d+)/i.exec(sub) || /\bS(\d+)\s*E(\d+)\b/i.exec(sub);
+  const yr = /^\s*((?:19|20)\d{2})\s*$/.exec(sub);
+  return { title: it.seriesName || it.title, year: it.year || (yr ? +yr[1] : ''), season: it.season || (ep ? +ep[1] : ''), episode: it.episode || (ep ? +ep[2] : ''), url: it.url };
+}
 
 // Films and catch-up: pick up again at the same point after a drop, a few times by itself,
 // then ask (Resume / Start from the beginning / Exit). The resume point is never thrown away.
@@ -167,16 +173,37 @@ N.on('extplayer', (d) => {
 
 // ---------- default player per section (Settings > Downloads and players) ----------
 // Returns true when the video was handed to VLC / MX Player instead of the built-in player.
-function viaDefaultPlayer(section, url, title, position = 0) {
-  if (!N.isNative) return false;
+function defaultPlayerApp(section) {
+  if (!N.isNative) return null;
   const pkg = setting({ live: 'playerLive', movie: 'playerMovie', series: 'playerSeries' }[section]);
-  if (!pkg || pkg === 'lumen') return false;
-  const app = N.installedApps().find((a) => a.pkg === pkg && a.role === 'player');
+  if (!pkg || pkg === 'lumen') return null;
+  return N.installedApps().find((a) => a.pkg === pkg && a.role === 'player') || null;
+}
+function viaDefaultPlayer(section, url, title, position = 0, subtitle = '') {
+  const app = defaultPlayerApp(section);
   if (!app) return false;
   if (P.previewCh) stopPreview();
-  const ok = N.openWith(pkg, url, { title, mode: 'play', position: Math.round(position || 0) });
+  const ok = N.openWith(app.pkg, url, { title, mode: 'play', position: Math.round(position || 0), subtitle });
   if (ok === false) { toast(`${app.name} couldn’t open this. Playing here instead.`, 'err'); return false; }
   return true;
+}
+// Films and episodes that open in VLC / MX: find the subtitle first (a saved copy is instant; a new
+// search gets a few seconds at most), then hand video and subtitle over together.
+const SUB_WAIT = 7000;
+let handingOver = false;
+async function subtitleFor(item) {
+  const lang = item.subLang != null ? item.subLang : subtitleLanguage();
+  if (!lang) return '';
+  let timer;
+  const found = await Promise.race([
+    findSubtitle(subItem(item), lang).catch(() => null),
+    new Promise((resolve) => { timer = setTimeout(() => resolve(undefined), SUB_WAIT); }),
+  ]);
+  clearTimeout(timer);
+  if (found === undefined) toast(`${langName(lang)} subtitles are taking too long. Playing without them.`);
+  else if (!found) toast(`No ${langName(lang)} subtitles found for this title`);
+  // only a file saved on this device can be passed to another app
+  return found && /^content:/.test(found.uri) ? found.uri : '';
 }
 
 // ---------- entry points ----------
@@ -221,8 +248,19 @@ export function playVod(item, resumeKey, onExit, queue, { forceBuiltIn = false, 
     if (ok !== false) { P.ext = { item, resumeKey, startedAt: Date.now() }; return; }
     toast('That player could not open this video. Playing in Lumen TV.', 'err');
   }
-  if (!forceBuiltIn && !playerPkg && !P.mode && viaDefaultPlayer(section, urlOr(item.url), title, saved ? saved.pos : 0)) {
-    P.ext = { item, resumeKey, startedAt: Date.now() };   // VLC / MX report the position back when they close
+  if (!forceBuiltIn && !playerPkg && !P.mode && defaultPlayerApp(section)) {
+    if (handingOver) return;
+    const lang = item.subLang != null ? item.subLang : subtitleLanguage();
+    const go = (subtitle) => {
+      if (viaDefaultPlayer(section, urlOr(item.url), title, saved ? saved.pos : 0, subtitle)) {
+        P.ext = { item, resumeKey, startedAt: Date.now() };   // VLC / MX report the position back when they close
+      } else playVod(item, resumeKey, onExit, queue, { forceBuiltIn: true });
+    };
+    // (only for films and episodes from the playlist; other sources hand over at once, as before)
+    if (!lang || item.torrentItem || !/^(movie|ep):/.test(resumeKey || '')) { go(''); return; }
+    handingOver = true;
+    toast(`Finding ${langName(lang)} subtitles…`);
+    subtitleFor(item).then((subtitle) => { handingOver = false; if (!P.mode) go(subtitle); }, () => { handingOver = false; go(''); });
     return;
   }
   P.onExit = onExit || P.onExit;
@@ -447,12 +485,26 @@ async function subtitleMenu() {
   const t = N.tracks();
   const opts = [{ label: 'Off', value: 'off', on: !t.text.some((x) => x.selected) }];
   for (const x of t.text) opts.push({ label: x.label, value: 'id:' + x.id, on: x.selected, icon: 'subtitles', hint: x.external ? 'Downloaded' : 'In the video' });
+  if (P.mode === 'vod') {
+    opts.push({ label: 'English · find online', value: 'cat:en', icon: 'search', hint: 'SubtitleCat, no account needed' });
+    opts.push({ label: 'Malayalam · find online', value: 'cat:ml', icon: 'search', hint: 'SubtitleCat, when a Malayalam file exists' });
+  }
   if (P.mode === 'vod') opts.push({ label: 'Search online · SubDL + OpenSubtitles', value: 'online', icon: 'search', hint: hasKey() ? (setting('subLangs') || []).map(langName).join(', ') : 'Add a subtitle key in Settings' });
   if (P.mode === 'vod') opts.push({ label: 'Search subtitles by title', value: 'search-title', icon: 'search', hint: 'Useful when a filename has release tags or a multi-episode pack' });
   opts.push({ label: 'Subtitle size', value: 'size', icon: 'subtitles', hint: { s: 'Small', m: 'Medium', l: 'Large' }[setting('subSize') || 'm'] });
   const v = await sheet({ title: 'Subtitles', options: opts });
   if (!v) return;
   if (v === 'off') { N.selectTrack('text', 'off'); subsBox().innerHTML = ''; return; }
+  if (v.startsWith('cat:')) {
+    const lang = v.slice(4), it = P.item;
+    toast(`Finding ${langName(lang)} subtitles…`);
+    const found = await findSubtitle(subItem(it), lang).catch(() => null);
+    if (P.item !== it || P.mode !== 'vod') return;
+    if (!found) { toast(`No ${langName(lang)} subtitles found for this title`, 'err'); return; }
+    N.loadSubtitle(found.uri, found.lang, found.source);
+    toast(`Subtitles: ${langName(lang)}`);
+    return;
+  }
   if (v.startsWith('id:')) { N.selectTrack('text', v.slice(3)); return; }
   if (v === 'size') {
     const z = await sheet({ title: 'Subtitle size', options: [['s', 'Small'], ['m', 'Medium'], ['l', 'Large']].map(([k, l]) => ({ label: l, value: k, on: setting('subSize') === k })) });
